@@ -11,16 +11,17 @@ SECRET_KEY = env("SECRET_KEY", default="dev-only-insecure-key")
 DEBUG = env("DEBUG", default=True)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
 
-# mission_control.tenants is appended in Task 1.2, mission_control.users in Task 1.3,
-# and mission_control.missions in Stage 3 (once those apps exist). Listing an app
-# before its package exists breaks django.setup(), which pytest-django runs before
-# test collection, so INSTALLED_APPS only lists apps that exist as of this task.
+# mission_control.users is appended in Task 1.3, and mission_control.missions in
+# Stage 3 (once those apps exist). Listing an app before its package exists breaks
+# django.setup(), which pytest-django runs before test collection, so INSTALLED_APPS
+# only lists apps that exist as of this task.
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "mission_control.common",
+    "mission_control.tenants",
 ]
 
 MIDDLEWARE = [

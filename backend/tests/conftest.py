@@ -1,12 +1,21 @@
 import pytest
 from rest_framework.test import APIClient
 
-# The `_clean_tenant_context` autouse fixture (and its import of
-# mission_control.tenants.context) is added in Task 1.2, once that package exists.
-# A module-level import of a nonexistent package here would break collection for
-# every test run, the same failure mode the settings.INSTALLED_APPS ruling avoids.
+from mission_control.tenants.context import reset_current_tenant_id, set_current_tenant_id
 
 TEST_PASSWORD = "password123"
+
+
+@pytest.fixture(autouse=True)
+def _clean_tenant_context():
+    """Ensure every test starts and ends with no tenant in context.
+
+    Guards against tenant context leaking between tests (e.g. a test that sets a
+    tenant and forgets to reset it, or a prior test's failure skipping cleanup).
+    """
+    token = set_current_tenant_id(None)
+    yield
+    reset_current_tenant_id(token)
 
 
 @pytest.fixture
