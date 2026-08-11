@@ -1,5 +1,7 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.http import Http404
 from rest_framework import serializers
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied
 
 from mission_control.common.exception_handler import exception_handler
 from mission_control.common.exceptions import ApplicationError
@@ -33,3 +35,39 @@ def test_not_found_envelope():
     resp = exception_handler(NotFound(), {})
     assert resp.status_code == 404
     assert resp.data["extra"] == {}
+
+
+def test_not_authenticated_envelope_and_www_authenticate_header():
+    exc = NotAuthenticated()
+    exc.auth_header = "Bearer"
+    resp = exception_handler(exc, {})
+    assert resp.status_code == 401
+    assert resp.data == {
+        "message": "Authentication credentials were not provided.",
+        "extra": {},
+    }
+    assert resp["WWW-Authenticate"] == "Bearer"
+
+
+def test_http404_envelope():
+    resp = exception_handler(Http404(), {})
+    assert resp.status_code == 404
+    assert resp.data == {"message": "Not found.", "extra": {}}
+
+
+def test_django_validation_error_envelope():
+    exc = DjangoValidationError({"name": ["This field is required."]})
+    resp = exception_handler(exc, {})
+    assert resp.status_code == 400
+    assert resp.data["message"] == "Validation error"
+    assert resp.data["extra"]["fields"] == {"name": ["This field is required."]}
+
+
+def test_bare_validation_error_wraps_non_dict_detail_as_non_field_errors():
+    exc = serializers.ValidationError("Mission cannot be edited in this state.")
+    resp = exception_handler(exc, {})
+    assert resp.status_code == 400
+    assert resp.data["message"] == "Validation error"
+    assert resp.data["extra"]["fields"] == {
+        "non_field_errors": ["Mission cannot be edited in this state."]
+    }
