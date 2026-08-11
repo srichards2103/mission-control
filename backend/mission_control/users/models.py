@@ -1,7 +1,10 @@
 from django.contrib.auth.base_user import AbstractBaseUser, BaseUserManager
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 from mission_control.common.models import BaseModel
+from mission_control.tenants.models import TenantModel
 from mission_control.users.roles import Role
 
 
@@ -31,3 +34,33 @@ class User(AbstractBaseUser, BaseModel):
 
     def __str__(self):
         return self.email
+
+
+class Skill(TenantModel):
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    is_archived = models.BooleanField(default=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(Lower("name"), "tenant", name="skill_name_per_tenant_uniq"),
+            models.UniqueConstraint(fields=["tenant", "id"], name="skill_tenant_id_uniq"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class CrewSkill(TenantModel):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="crew_skills")
+    skill = models.ForeignKey(Skill, on_delete=models.PROTECT, related_name="crew_skills")
+    proficiency = models.PositiveSmallIntegerField()
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(proficiency__gte=1) & Q(proficiency__lte=10),
+                name="crewskill_proficiency_1_10",
+            ),
+            models.UniqueConstraint(fields=["user", "skill"], name="crewskill_user_skill_uniq"),
+        ]
