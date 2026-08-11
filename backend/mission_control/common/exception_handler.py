@@ -35,6 +35,16 @@ def exception_handler(exc, ctx):
         response.data = {"message": "Validation error", "extra": {"fields": fields}}
         return response
 
+    if isinstance(exc.detail, dict) and "detail" in exc.detail:
+        # e.g. simplejwt's InvalidToken/AuthenticationFailed: {"detail": ..., "code": ...,
+        # "messages": [...]}. Promote "detail" to the envelope message and keep the rest
+        # (code, messages, ...) as extra, instead of stringifying the whole dict (which
+        # produced an unreadable Python repr as the message).
+        fields = dict(exc.detail)
+        message = str(fields.pop("detail"))
+        response.data = {"message": message, "extra": fields}
+        return response
+
     detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
     response.data = {"message": detail, "extra": {}}
     return response

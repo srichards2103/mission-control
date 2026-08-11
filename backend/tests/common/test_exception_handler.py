@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404
 from rest_framework import serializers
 from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied
+from rest_framework_simplejwt.exceptions import InvalidToken
 
 from mission_control.common.exception_handler import exception_handler
 from mission_control.common.exceptions import ApplicationError
@@ -71,3 +72,15 @@ def test_bare_validation_error_wraps_non_dict_detail_as_non_field_errors():
     assert resp.data["extra"]["fields"] == {
         "non_field_errors": ["Mission cannot be edited in this state."]
     }
+
+
+def test_dict_detail_exception_promotes_detail_key_to_message():
+    # simplejwt's InvalidToken (and other DetailDictMixin exceptions) carry a dict
+    # detail like {"detail": "...", "code": "...", "messages": [...]}. Before this was
+    # handled explicitly, `str(exc.detail)` stringified the whole dict into an
+    # unreadable Python repr as the envelope "message".
+    exc = InvalidToken()
+    resp = exception_handler(exc, {})
+    assert resp.status_code == 401
+    assert resp.data["message"] == "Token is invalid or expired"
+    assert resp.data["extra"]["code"] == "token_not_valid"
