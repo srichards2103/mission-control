@@ -10,8 +10,8 @@ services:
     environment:
       DATABASE_URL: postgres://mission:mission@db:5432/mission_control
       DEBUG: "false"
-      SECRET_KEY: change-me-in-real-deploys
-      ALLOWED_HOSTS: "*"
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
     depends_on:
       db: {condition: service_healthy}
   web:
