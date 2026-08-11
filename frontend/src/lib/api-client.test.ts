@@ -3,6 +3,24 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/testing/server";
 import { api, clearTokens, getAccessToken, getRefreshToken, setTokens } from "./api-client";
 
+// jsdom's window.location.assign is non-configurable, so it can't be spied on
+// directly; stub the whole `location` object for the duration of a test.
+function stubLocationAssign() {
+  const originalLocation = window.location;
+  const assign = vi.fn();
+  Object.defineProperty(window, "location", {
+    configurable: true,
+    writable: true,
+    value: { ...originalLocation, assign },
+  });
+  return {
+    assign,
+    restore: () => {
+      Object.defineProperty(window, "location", { configurable: true, writable: true, value: originalLocation });
+    },
+  };
+}
+
 describe("token store", () => {
   it("keeps access in memory and refresh in localStorage", () => {
     setTokens("acc-1", "ref-1");
@@ -80,15 +98,7 @@ describe("api interceptor", () => {
   });
 
   it("clears tokens and redirects to /login when the refresh request itself fails", async () => {
-    // jsdom's window.location.assign is non-configurable, so it can't be spied
-    // on directly; stub the whole `location` object for the duration of the test.
-    const originalLocation = window.location;
-    const assign = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      writable: true,
-      value: { ...originalLocation, assign },
-    });
+    const { assign, restore } = stubLocationAssign();
 
     try {
       server.use(
@@ -106,7 +116,30 @@ describe("api interceptor", () => {
       expect(localStorage.getItem("mc_refresh")).toBeNull();
       expect(assign).toHaveBeenCalledWith("/login");
     } finally {
-      Object.defineProperty(window, "location", { configurable: true, writable: true, value: originalLocation });
+      restore();
+    }
+  });
+
+  it("clears tokens and redirects to /login when the refresh response body is malformed", async () => {
+    const { assign, restore } = stubLocationAssign();
+
+    try {
+      server.use(
+        // Malformed body: no `refresh` field, `access` is the wrong type.
+        // Must not silently call setTokens(undefined, undefined) and carry on.
+        http.post("/api/v1/auth/token/refresh/", () => HttpResponse.json({ access: 123 })),
+        http.get("/api/v1/protected/", () =>
+          HttpResponse.json({ message: "Unauthorized", extra: {} }, { status: 401 }),
+        ),
+      );
+
+      await expect(api.get("/protected/")).rejects.toBeTruthy();
+
+      expect(getAccessToken()).toBeNull();
+      expect(localStorage.getItem("mc_refresh")).toBeNull();
+      expect(assign).toHaveBeenCalledWith("/login");
+    } finally {
+      restore();
     }
   });
 

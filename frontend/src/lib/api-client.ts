@@ -1,4 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from "axios";
+import { z } from "zod";
 
 let accessToken: string | null = null;
 const REFRESH_KEY = "mc_refresh";
@@ -32,16 +33,23 @@ type RetriableRequestConfig = InternalAxiosRequestConfig & { _retried?: boolean 
 // refresh token and blacklist itself).
 let refreshPromise: Promise<string> | null = null;
 
+const refreshResponseSchema = z.object({ access: z.string(), refresh: z.string() });
+
 async function refreshAccessToken(refresh: string): Promise<string> {
   if (!refreshPromise) {
     refreshPromise = axios
       .post("/api/v1/auth/token/refresh/", { refresh })
       .then(({ data }) => {
+        // Parse before trusting the body: a malformed response (proxy error
+        // page, renamed field) must throw here rather than silently calling
+        // setTokens(undefined, undefined), which would leave every later
+        // request going out unauthenticated with no error surfaced anywhere.
+        const parsed = refreshResponseSchema.parse(data);
         // Refresh-token rotation is ON server-side: every successful refresh
         // returns a NEW refresh token and blacklists the one just used, so it
         // must be persisted back to localStorage or the next refresh 401s.
-        setTokens(data.access, data.refresh);
-        return data.access as string;
+        setTokens(parsed.access, parsed.refresh);
+        return parsed.access;
       })
       .finally(() => {
         refreshPromise = null;
