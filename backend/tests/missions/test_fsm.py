@@ -4,11 +4,20 @@ import pytest
 from rest_framework.exceptions import PermissionDenied
 
 from mission_control.common.exceptions import ApplicationError
-from mission_control.missions.factories import MissionFactory, MissionRequirementFactory
-from mission_control.missions.models import Mission, MissionStatus, MissionTransition
+from mission_control.missions.factories import (
+    AssignmentFactory,
+    MissionFactory,
+    MissionRequirementFactory,
+)
+from mission_control.missions.models import (
+    AssignmentStatus,
+    Mission,
+    MissionStatus,
+    MissionTransition,
+)
 from mission_control.missions.services.missions import TRANSITIONS, transition_mission
 from mission_control.tenants.context import set_current_tenant_id
-from mission_control.users.factories import UserFactory
+from mission_control.users.factories import CrewSkillFactory, UserFactory
 from mission_control.users.roles import Role
 
 pytestmark = pytest.mark.django_db
@@ -33,11 +42,26 @@ def force_status(mission, status):
     return mission
 
 
+def staff(mission):
+    """Accept one qualified crew member so the staffing guard passes (requirement is prof>=5).
+
+    Task 4.4 wires a real staffing guard into approve/activate: any FSM test that
+    reaches one of those transitions and expects it to succeed needs a staffed
+    mission first, not just the two the brief names -- the guard fires on every
+    successful approve/activate in this file.
+    """
+    requirement = mission.requirements.first()
+    crew = UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant)
+    CrewSkillFactory(user=crew, skill=requirement.skill, proficiency=requirement.min_proficiency)
+    AssignmentFactory(mission=mission, user=crew, status=AssignmentStatus.ACCEPTED)
+
+
 # --- Brief scenarios ---------------------------------------------------------------
 
 
 def test_happy_path_submit_approve(mission_with_requirement):
     mission = mission_with_requirement
+    staff(mission)
     lead = mission.created_by
     mission = transition_mission(actor=lead, mission=mission, action="submit")
     assert mission.status == MissionStatus.PENDING_APPROVAL
@@ -105,6 +129,7 @@ def test_crew_cannot_transition(mission_with_requirement):
 
 def test_activate_needs_start_date_reached(mission_with_requirement):
     mission = mission_with_requirement  # factory default: starts 10 days in the future
+    staff(mission)
     transition_mission(actor=mission.created_by, mission=mission, action="submit")
     mission = transition_mission(actor=director_for(mission), mission=mission, action="approve")
     with pytest.raises(ApplicationError, match="start date"):
@@ -137,6 +162,7 @@ def test_full_lifecycle_to_completed():
     mission = MissionFactory(start_date=today - dt.timedelta(days=5), end_date=today)
     MissionRequirementFactory(mission=mission)
     set_current_tenant_id(mission.tenant_id)
+    staff(mission)
     lead, director = mission.created_by, director_for(mission)
 
     mission = transition_mission(actor=lead, mission=mission, action="submit")
@@ -249,6 +275,7 @@ def test_failed_guard_leaves_no_trace(mission_with_requirement):
 
 def test_approver_may_be_a_director_who_never_touched_the_mission(mission_with_requirement):
     mission = mission_with_requirement
+    staff(mission)
     transition_mission(actor=mission.created_by, mission=mission, action="submit")
     mission = transition_mission(actor=director_for(mission), mission=mission, action="approve")
     assert mission.status == MissionStatus.APPROVED
@@ -256,6 +283,7 @@ def test_approver_may_be_a_director_who_never_touched_the_mission(mission_with_r
 
 def test_no_submission_row_does_not_block_approval(mission_with_requirement):
     """A mission parked in pending_approval with no audit history has no submitter."""
+    staff(mission_with_requirement)
     mission = force_status(mission_with_requirement, MissionStatus.PENDING_APPROVAL)
     mission = transition_mission(actor=director_for(mission), mission=mission, action="approve")
     assert mission.status == MissionStatus.APPROVED
@@ -264,6 +292,7 @@ def test_no_submission_row_does_not_block_approval(mission_with_requirement):
 def test_only_the_latest_submitter_is_blocked(mission_with_requirement):
     """After a reject/revise/re-submit cycle, the *first* submitter may review again."""
     mission = mission_with_requirement
+    staff(mission)
     first_submitter = director_for(mission)
     second_reviewer = director_for(mission)
 

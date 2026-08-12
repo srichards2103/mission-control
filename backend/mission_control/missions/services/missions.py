@@ -67,13 +67,58 @@ def _ensure_not_reviewing_own_mission(actor, mission: Mission) -> None:
         raise PermissionDenied("You cannot review your own mission.")
 
 
-def _validate_staffing_for_approval(mission: Mission) -> None:
-    """Stage 4 wires the real staffing validation here (coverage, crew bounds, hard conflicts).
+def _lock_accepted_crew(mission: Mission) -> None:
+    """Row-lock the mission's accepted crew's `User` rows.
 
-    Called from the approve and activate guards; deliberately a no-op until then so that
-    Stage 4 only has to replace this function body.
+    Serializes competing approvals/activations that share crew members: whichever
+    transition gets here first holds the lock until its transaction commits, so the
+    second one to run sees the first one's committed state (e.g. a hard-block conflict
+    it just created) rather than a stale read from before it started.
     """
-    return None
+    from mission_control.missions.models import Assignment, AssignmentStatus
+    from mission_control.users.models import User
+
+    accepted_user_ids = list(
+        Assignment.objects.filter(
+            mission=mission, status=AssignmentStatus.ACCEPTED
+        ).values_list("user_id", flat=True)
+    )
+    list(User.objects.select_for_update().filter(id__in=accepted_user_ids))
+
+
+def _validate_staffing_for_approval(mission: Mission) -> None:
+    """Full staffing validation for the approve guard: coverage, crew bounds, conflicts.
+
+    This is the only place `approve` checks staffing; spec §8 lists "staffing valid"
+    as approve's guard.
+    """
+    from mission_control.missions.selectors.staffing import staffing_validation_errors
+
+    _lock_accepted_crew(mission)
+    errors = staffing_validation_errors(mission)
+    if errors:
+        raise ApplicationError("Mission staffing is not valid.", extra={"errors": errors})
+
+
+def _validate_conflicts_for_activation(mission: Mission) -> None:
+    """Belt-and-braces re-check for the activate guard: conflicts only, not full validation.
+
+    Spec §8 describes activate's staffing check as "re-runs conflict check (belt and
+    braces)" -- narrower than approve's full "staffing valid". Coverage/crew-bounds
+    were already proven at approve time and cannot silently regress except via
+    `assignment_remove` (a lead/director action, independent of this FSM); re-running
+    the full validation here would block activation of an already-approved mission
+    whose crew member was later removed or declined, which the plan does not intend.
+    What CAN change between approve and activate is a *different* mission getting
+    approved in the meantime and hard-blocking one of this mission's accepted crew --
+    that is what this re-check exists to catch.
+    """
+    from mission_control.missions.selectors.staffing import mission_conflict_errors
+
+    _lock_accepted_crew(mission)
+    errors = mission_conflict_errors(mission)
+    if errors:
+        raise ApplicationError("Mission staffing is not valid.", extra={"errors": errors})
 
 
 def _run_guards(action: str, mission: Mission) -> None:
@@ -85,7 +130,7 @@ def _run_guards(action: str, mission: Mission) -> None:
     if action == "activate":
         if mission.start_date > dt.date.today():
             raise ApplicationError("Mission cannot activate before its start date.")
-        _validate_staffing_for_approval(mission)
+        _validate_conflicts_for_activation(mission)
     if action == "complete" and mission.end_date > dt.date.today():
         raise ApplicationError("Mission cannot complete before its end date.")
 
@@ -126,6 +171,20 @@ def transition_mission(
         actor=actor,
         reason=reason or "",
     )
+    if action == "cancel":
+        # Same atomic transaction as the status write and audit row above: a cancel
+        # that flips status but leaves crew assigned (or vice versa) is a defect.
+        # `assignment_live_uniq` is a partial unique index on live statuses only, so
+        # flipping these rows out of the live set can never collide with anything.
+        from mission_control.missions.models import (
+            LIVE_ASSIGNMENT_STATUSES,
+            Assignment,
+            AssignmentStatus,
+        )
+
+        Assignment.objects.filter(mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES).update(
+            status=AssignmentStatus.REMOVED
+        )
     return mission
 
 

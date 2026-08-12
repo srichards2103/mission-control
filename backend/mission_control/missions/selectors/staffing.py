@@ -236,8 +236,47 @@ def mission_coverage(mission: Mission) -> CoverageReport:
     )
 
 
+def mission_conflict_errors(mission: Mission) -> list[str]:
+    """Hard-block conflicts held by this mission's own accepted crew, human-readable.
+
+    This is the "conflicts" slice of `staffing_validation_errors` on its own, factored
+    out so the activate guard can re-run *only* this check (spec §8's "re-runs conflict
+    check (belt and braces)") without restating the hard-block predicate or re-deriving
+    the query -- it calls the same one query `staffing_validation_errors` uses.
+    """
+    # One query: the hard blocks (elsewhere) held by this mission's own accepted crew.
+    # Ordered so each member's earliest competing commitment is the one reported.
+    blocking = (
+        _hard_block_qs(
+            start_date=mission.start_date,
+            end_date=mission.end_date,
+            exclude_mission_id=mission.id,
+        )
+        .filter(user_id__in=_accepted_assignments_qs(mission).values("user_id"))
+        .select_related("mission", "user")
+        .order_by("user__name", "user_id", "mission__start_date", "mission_id")
+    )
+    errors: list[str] = []
+    seen: set[int] = set()
+    for assignment in blocking:
+        if assignment.user_id in seen:
+            continue
+        seen.add(assignment.user_id)
+        errors.append(f"{assignment.user.name} is committed to '{assignment.mission.name}'.")
+    return errors
+
+
 def staffing_validation_errors(mission: Mission) -> list[str]:
-    """Human-readable reasons the mission is not ready to be approved (empty = ready)."""
+    """Human-readable reasons the mission is not ready to be approved (empty = ready).
+
+    Full validation: coverage, crew bounds, and conflicts. Used by the approve guard.
+    The activate guard's belt-and-braces re-check calls `mission_conflict_errors`
+    directly instead, since coverage/crew-bounds cannot regress between approval and
+    activation without going through `assignment_remove`, which is a lead/director
+    action independent of the FSM -- re-proving it at activate would wrongly block an
+    already-approved mission over crew changes the activate guard was never meant to
+    police (only fresh conflicts from other missions being approved in the interim).
+    """
     report = mission_coverage(mission)
     errors = [
         f"Requirement {c.skill_name} ≥{c.min_proficiency} needs "
@@ -257,22 +296,5 @@ def staffing_validation_errors(mission: Mission) -> list[str]:
             f"exceeding max_crew ({mission.max_crew})."
         )
 
-    # One query: the hard blocks (elsewhere) held by this mission's own accepted crew.
-    # Ordered so each member's earliest competing commitment is the one reported.
-    blocking = (
-        _hard_block_qs(
-            start_date=mission.start_date,
-            end_date=mission.end_date,
-            exclude_mission_id=mission.id,
-        )
-        .filter(user_id__in=_accepted_assignments_qs(mission).values("user_id"))
-        .select_related("mission", "user")
-        .order_by("user__name", "user_id", "mission__start_date", "mission_id")
-    )
-    seen: set[int] = set()
-    for assignment in blocking:
-        if assignment.user_id in seen:
-            continue
-        seen.add(assignment.user_id)
-        errors.append(f"{assignment.user.name} is committed to '{assignment.mission.name}'.")
+    errors.extend(mission_conflict_errors(mission))
     return errors
