@@ -2,6 +2,7 @@ from django.urls import path
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from mission_control.users.apis.auth import MeApi
+from mission_control.users.apis.crew import CrewDetailApi, CrewListApi
 from mission_control.users.apis.profile import MySkillsApi
 from mission_control.users.apis.skills import SkillListCreateApi, SkillUpdateApi
 
@@ -12,4 +13,6 @@ urlpatterns = [
     path("me/skills/", MySkillsApi.as_view()),
     path("skills/", SkillListCreateApi.as_view()),
     path("skills/<int:skill_id>/", SkillUpdateApi.as_view()),
+    path("crew/", CrewListApi.as_view()),
+    path("crew/<int:user_id>/", CrewDetailApi.as_view()),
 ]
