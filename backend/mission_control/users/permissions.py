@@ -1,7 +1,6 @@
 from enum import StrEnum
 
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import BasePermission
 
 from mission_control.users.roles import Role
 
@@ -51,7 +50,10 @@ ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
 
 
 def permissions_for_role(role: str) -> frozenset[Permission]:
-    return ROLE_PERMISSIONS[role]
+    # `.get`, not `[]`: an unrecognised role (a hand-edited DB row, a role removed from
+    # the catalogue while a session is live) must fail closed with a 403 from
+    # `ensure_permission`, not a KeyError that escapes the error envelope as a 500.
+    return ROLE_PERMISSIONS.get(role, frozenset())
 
 
 def user_has_permission(user, perm: Permission) -> bool:
@@ -61,11 +63,3 @@ def user_has_permission(user, perm: Permission) -> bool:
 def ensure_permission(user, perm: Permission) -> None:
     if not user_has_permission(user, perm):
         raise PermissionDenied
-
-
-def HasPermission(perm: Permission) -> type[BasePermission]:
-    class _HasPermission(BasePermission):
-        def has_permission(self, request, view):
-            return user_has_permission(request.user, perm)
-
-    return _HasPermission

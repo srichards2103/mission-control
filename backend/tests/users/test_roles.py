@@ -2,7 +2,12 @@ import pytest
 from rest_framework.exceptions import PermissionDenied
 
 from mission_control.users.factories import UserFactory
-from mission_control.users.permissions import Permission, ensure_permission, permissions_for_role
+from mission_control.users.permissions import (
+    Permission,
+    ensure_permission,
+    permissions_for_role,
+    user_has_permission,
+)
 from mission_control.users.roles import Role
 
 
@@ -35,3 +40,19 @@ def test_ensure_permission_raises_for_missing():
     ensure_permission(crew, Permission.OWN_SKILLS_EDIT)  # no raise
     with pytest.raises(PermissionDenied):
         ensure_permission(crew, Permission.MISSION_CREATE)
+
+
+def test_unrecognised_role_fails_closed_with_no_permissions():
+    """A hand-edited DB row (or a role dropped from the catalogue while a session is
+    live) must yield an empty permission set -- `ROLE_PERMISSIONS[role]` used to raise
+    KeyError, which is neither an ApplicationError nor a DRF exception and so escaped
+    the error envelope as an unhandled 500.
+    """
+    assert permissions_for_role("not_a_role") == frozenset()
+
+    class _Ghost:
+        role = "not_a_role"
+
+    assert user_has_permission(_Ghost(), Permission.SKILL_VIEW) is False
+    with pytest.raises(PermissionDenied):
+        ensure_permission(_Ghost(), Permission.SKILL_VIEW)

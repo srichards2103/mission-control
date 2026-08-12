@@ -58,3 +58,20 @@ def test_proficiency_check_constraint():
         CrewSkill.objects_unscoped.create(
             tenant=user.tenant, user=user, skill=skill, proficiency=11
         )
+
+
+def test_tenant_update_refuses_a_tenant_the_actor_does_not_belong_to():
+    """`Tenant` is the tenancy root, so it has no fail-closed manager -- without this
+    assertion `tenant_update` is a bare cross-tenant write primitive, safe only by the
+    accident of its single caller passing `request.user.tenant`.
+    """
+    from rest_framework.exceptions import PermissionDenied
+
+    from mission_control.tenants.services import tenant_update
+
+    actor = UserFactory()
+    other = TenantFactory()
+    with pytest.raises(PermissionDenied):
+        tenant_update(actor=actor, tenant=other, name="Hostile Takeover")
+    other.refresh_from_db()
+    assert other.name != "Hostile Takeover"

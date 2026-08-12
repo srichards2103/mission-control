@@ -9,6 +9,28 @@ from mission_control.users.roles import Role
 
 
 class UserManager(BaseUserManager):
+    @staticmethod
+    def normalize_email(email):
+        """Lowercase the WHOLE address, not just the domain.
+
+        Django's `BaseUserManager.normalize_email` lowercases only the domain part, so
+        a director hand-entering `Sam@example.com` stored a row that `sam@example.com`
+        could never find again: login is an exact match on `USERNAME_FIELD`,
+        `user_create`'s `email__iexact` guard then refuses to create the lowercase
+        variant, `user_update` accepts only `role`/`is_active`, and there is no
+        email-change or password-reset flow -- the account is unusable and
+        unrepairable through the product. Addresses are stored in one canonical form
+        instead.
+        """
+        return BaseUserManager.normalize_email(email).lower()
+
+    def get_by_natural_key(self, username):
+        # Stored addresses are canonically lowercase (above), but a human typing their
+        # own email at the login form is under no such discipline. `iexact` so
+        # `Sam@example.com` authenticates against the stored `sam@example.com` instead
+        # of failing with "no active account found".
+        return self.get(**{f"{self.model.USERNAME_FIELD}__iexact": username})
+
     def create_user(self, *, email, password, tenant, role, name):
         user = self.model(email=self.normalize_email(email), tenant=tenant, role=role, name=name)
         user.set_password(password)

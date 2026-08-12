@@ -134,3 +134,39 @@ def test_lead_cannot_rename_organisation(auth_client_for):
     lead = UserFactory(role=Role.MISSION_LEAD)
     resp = auth_client_for(lead).patch("/api/v1/settings/organisation/", {"name": "Nope"})
     assert resp.status_code == 403
+
+
+# ------------------------------------------------------------------- email canonicalisation
+# S2 (final whole-branch review): `BaseUserManager.normalize_email` lowercases only the
+# domain, so a hand-entered `Sam@Example.com` was stored verbatim and then unreachable --
+# login is exact-match, `user_create`'s `email__iexact` guard blocks re-creating the
+# lowercase variant, `user_update` accepts only role/is_active, and there is no
+# email-change or password-reset flow. The account could only be repaired from a shell.
+
+
+def test_created_email_is_stored_fully_lowercased(auth_client_for, api_client):
+    director = UserFactory(role=Role.DIRECTOR)
+    resp = auth_client_for(director).post("/api/v1/settings/users/", {
+        "email": "Sam.Richards@Example.COM", "name": "Sam", "role": "crew_member",
+        "password": "s3cret-pw",
+    })
+    assert resp.status_code == 201
+    assert resp.data["email"] == "sam.richards@example.com"
+    created = User.objects.get(email="sam.richards@example.com")
+    assert created.email == "sam.richards@example.com"
+
+    # And the account is usable: login works whichever case the human types.
+    for typed in ("sam.richards@example.com", "Sam.Richards@Example.COM"):
+        login = api_client.post("/api/v1/auth/token/", {"email": typed, "password": "s3cret-pw"})
+        assert login.status_code == 200, typed
+
+
+def test_duplicate_email_differing_only_in_case_is_a_400_not_a_500(auth_client_for):
+    director = UserFactory(role=Role.DIRECTOR)
+    client = auth_client_for(director)
+    body = {"email": "dup@example.com", "name": "First", "role": "crew_member",
+            "password": "s3cret-pw"}
+    assert client.post("/api/v1/settings/users/", body).status_code == 201
+    resp = client.post("/api/v1/settings/users/", {**body, "email": "DUP@example.com"})
+    assert resp.status_code == 400
+    assert "email" in resp.data["extra"]["fields"]
