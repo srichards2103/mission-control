@@ -74,3 +74,33 @@ class MissionRequirement(TenantModel):
                 name="requirement_mission_skill_prof_uniq",
             ),
         ]
+
+
+class AssignmentStatus(models.TextChoices):
+    PROPOSED = "proposed"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    REMOVED = "removed"
+
+
+LIVE_ASSIGNMENT_STATUSES = frozenset({AssignmentStatus.PROPOSED, AssignmentStatus.ACCEPTED})
+
+
+class Assignment(TenantModel):
+    mission = models.ForeignKey(Mission, on_delete=models.CASCADE, related_name="assignments")
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="assignments")
+    status = models.CharField(
+        max_length=16, choices=AssignmentStatus.choices, default=AssignmentStatus.PROPOSED
+    )
+    decline_reason = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["mission", "user"],
+                condition=Q(status__in=["proposed", "accepted"]),
+                name="assignment_live_uniq",
+            ),
+        ]

@@ -2,7 +2,7 @@ import datetime as dt
 
 import factory
 
-from mission_control.missions.models import Mission, MissionRequirement
+from mission_control.missions.models import Assignment, Mission, MissionRequirement
 from mission_control.tenants.factories import TenantModelFactory
 from mission_control.users.factories import SkillFactory, TenantFactory, UserFactory
 from mission_control.users.roles import Role
@@ -33,3 +33,15 @@ class MissionRequirementFactory(TenantModelFactory):
     skill = factory.SubFactory(SkillFactory, tenant=factory.SelfAttribute("..mission.tenant"))
     min_proficiency = 5
     required_count = 1
+
+
+class AssignmentFactory(TenantModelFactory):
+    class Meta:
+        model = Assignment
+
+    mission = factory.SubFactory(MissionFactory)
+    tenant = factory.SelfAttribute("mission.tenant")
+    user = factory.SubFactory(
+        UserFactory, role=Role.CREW_MEMBER, tenant=factory.SelfAttribute("..mission.tenant")
+    )
+    created_by = factory.SelfAttribute("mission.created_by")
