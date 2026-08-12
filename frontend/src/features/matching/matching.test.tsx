@@ -52,12 +52,49 @@ const twoMemberMatch = {
       requirement_id: 1,
       skill_name: "Piloting",
       min_proficiency: 7,
-      candidates: [{ user_id: 5, name: "Jae Kim", proficiency: 8, score: 0.7 }],
+      // Two candidates, not one -- needed to exercise re-swapping the same seat
+      // (pick Jae Kim, reconsider, pick Lee Zhao) without running out of options.
+      candidates: [
+        { user_id: 5, name: "Jae Kim", proficiency: 8, score: 0.7 },
+        { user_id: 6, name: "Lee Zhao", proficiency: 7, score: 0.6 },
+      ],
     },
     { requirement_id: 2, skill_name: "Navigation", min_proficiency: 5, candidates: [] },
     { requirement_id: 3, skill_name: "Engineering", min_proficiency: 9, candidates: [] },
   ],
   open_capacity: 2,
+};
+
+// A single generalist covering two seats (Piloting + Navigation) -- the scenario
+// Finding 2 is about: swapping out just the Piloting seat unchecks the whole member,
+// and the Navigation badge must still be visible but clearly marked as no longer
+// proposed, not silently unchanged.
+const generalistMatch = {
+  team: [
+    {
+      user_id: 7,
+      name: "Alex Chen",
+      seats: [
+        { requirement_id: 1, skill_name: "Piloting", min_proficiency: 7, proficiency: 9 },
+        { requirement_id: 2, skill_name: "Navigation", min_proficiency: 5, proficiency: 8 },
+      ],
+      score: 1.5,
+      breakdown: { proficiency_fit: 0.9, workload_balance: 0.9, soft_conflict_penalty: 0 },
+      workload_days: 2,
+      soft_conflicts: [],
+    },
+  ],
+  unfilled_seats: [],
+  alternatives: [
+    {
+      requirement_id: 1,
+      skill_name: "Piloting",
+      min_proficiency: 7,
+      candidates: [{ user_id: 8, name: "Jae Kim", proficiency: 8, score: 0.7 }],
+    },
+    { requirement_id: 2, skill_name: "Navigation", min_proficiency: 5, candidates: [] },
+  ],
+  open_capacity: 1,
 };
 
 describe("matcher dialog", () => {
@@ -118,6 +155,67 @@ describe("matcher dialog", () => {
 
     await userEvent.click(within(dialog).getByRole("button", { name: /propose 2 assignments/i }));
     expect(posted).toEqual({ user_ids: [4, 5] });
+  });
+
+  it("re-swapping the same seat replaces the previous candidate instead of adding a phantom extra one", async () => {
+    server.use(http.post("/api/v1/missions/10/match/", () => HttpResponse.json(twoMemberMatch)));
+    let posted: unknown = null;
+    server.use(
+      http.post("/api/v1/missions/10/assignments/", async ({ request }) => {
+        posted = await request.json();
+        return HttpResponse.json(
+          { requirements: [], accepted_count: 0, min_crew: 3, max_crew: 6, fully_covered: false, roster: [] },
+          { status: 201 },
+        );
+      }),
+    );
+
+    renderAt("/missions/10");
+    const dialog = await openMatchDialog();
+    await within(dialog).findByText("Priya Nair");
+
+    // First swap: Priya -> Jae Kim.
+    await userEvent.click(within(dialog).getByRole("combobox", { name: /swap piloting ≥7/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /jae kim/i }));
+    expect(within(dialog).getByText(/swapped in: jae kim/i)).toBeInTheDocument();
+
+    // Reconsider: swap the same seat again, this time to Lee Zhao. Jae Kim must be
+    // dropped, not left behind as an extra, unexplained proposal.
+    await userEvent.click(within(dialog).getByRole("combobox", { name: /swap piloting ≥7/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /lee zhao/i }));
+
+    expect(within(dialog).getByText(/swapped in: lee zhao/i)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/swapped in: jae kim/i)).not.toBeInTheDocument();
+    // Still 2: Sam (unaffected) + Lee Zhao (the current Piloting pick) -- not 3.
+    expect(within(dialog).getByRole("button", { name: /propose 2 assignments/i })).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: /propose 2 assignments/i }));
+    // Sam (4) and Lee Zhao (6) only -- neither Priya (3, swapped out) nor Jae Kim
+    // (5, swapped out on the second pick) should appear.
+    expect(posted).toEqual({ user_ids: [4, 6] });
+  });
+
+  it("visibly marks a member's card as not proposed when a swap unchecks them, even though their other seat's badge still renders", async () => {
+    server.use(http.post("/api/v1/missions/10/match/", () => HttpResponse.json(generalistMatch)));
+
+    renderAt("/missions/10");
+    const dialog = await openMatchDialog();
+    await within(dialog).findByText("Alex Chen");
+    const card = screen.getByText("Alex Chen").closest("li") as HTMLElement;
+
+    // Before any swap: fully proposed, no "not proposed" marker, both seats shown.
+    expect(within(card).queryByText(/not proposed/i)).not.toBeInTheDocument();
+    expect(within(card).getByText(/navigation ≥5/i)).toBeInTheDocument();
+
+    await userEvent.click(within(card).getByRole("combobox", { name: /swap piloting ≥7/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /jae kim/i }));
+
+    // Alex is unchecked entirely (per the brief's "unchecks the member" semantics),
+    // but the Navigation seat they still cover keeps rendering -- it must now be
+    // visibly, not just programmatically, marked as no longer proposed.
+    expect(within(card).getByRole("checkbox", { name: /alex chen/i })).not.toBeChecked();
+    expect(within(card).getByText(/not proposed/i)).toBeInTheDocument();
+    expect(within(card).getByText(/navigation ≥5/i)).toBeInTheDocument();
   });
 
   it("shows the server's message when proposing the matched team is refused", async () => {
