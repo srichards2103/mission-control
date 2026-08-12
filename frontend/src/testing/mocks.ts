@@ -61,10 +61,75 @@ function initialMissions() {
 }
 let missions = initialMissions();
 
+// Mutable staffing state, keyed by mission id. Mutated in place by the bulk-propose and
+// remove handlers below so the staffing panel's mutations (which invalidate and refetch
+// GET .../staffing/) actually see the effect of a prior POST — same "reseed in
+// resetMockData()" reasoning as `skills`/`mySkills`/`missions` above. Default entry
+// mirrors `missionFixture`'s single Piloting requirement so every existing
+// mission-detail test (which now also renders the staffing panel) gets a schema-valid
+// response even though it never asserts on it.
+type StaffingFilledBy = { user_id: number; name: string; proficiency: number };
+type StaffingRequirement = {
+  requirement_id: number;
+  skill_id: number;
+  skill_name: string;
+  min_proficiency: number;
+  required_count: number;
+  filled_count: number;
+  filled_by: StaffingFilledBy[];
+};
+type SoftConflict = {
+  mission_id: number;
+  mission_name: string;
+  mission_status: string;
+  assignment_status: string;
+};
+type RosterEntry = {
+  assignment_id: number;
+  user_id: number;
+  name: string;
+  status: "proposed" | "accepted" | "declined" | "removed";
+  soft_conflicts: SoftConflict[];
+  hard_blocked: boolean;
+};
+type Staffing = {
+  requirements: StaffingRequirement[];
+  accepted_count: number;
+  min_crew: number;
+  max_crew: number;
+  fully_covered: boolean;
+  roster: RosterEntry[];
+};
+
+function initialStaffing(): Record<number, Staffing> {
+  return {
+    10: {
+      requirements: [
+        {
+          requirement_id: 1,
+          skill_id: 1,
+          skill_name: "Piloting",
+          min_proficiency: 5,
+          required_count: 1,
+          filled_count: 0,
+          filled_by: [],
+        },
+      ],
+      accepted_count: 0,
+      min_crew: 3,
+      max_crew: 6,
+      fully_covered: false,
+      roster: [],
+    },
+  };
+}
+let staffing = initialStaffing();
+
 export function resetMockData() {
   skills = initialSkills();
   mySkills = initialMySkills();
   missions = initialMissions();
+  staffing = initialStaffing();
 }
 
 export const server = setupServer(
@@ -247,6 +312,42 @@ export const server = setupServer(
       ],
     };
     missions[index] = updated;
+    return HttpResponse.json(updated);
+  }),
+  http.get("/api/v1/missions/:id/staffing/", ({ params }) => {
+    const found = staffing[Number(params.id)];
+    if (!found) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    return HttpResponse.json(found);
+  }),
+  http.post("/api/v1/missions/:id/assignments/", async ({ params, request }) => {
+    const missionId = Number(params.id);
+    const found = staffing[missionId];
+    if (!found) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    const body = (await request.json()) as { user_ids: number[] };
+    let nextAssignmentId = Math.max(0, ...found.roster.map((r) => r.assignment_id)) + 1;
+    const added: RosterEntry[] = body.user_ids.map((userId) => ({
+      assignment_id: nextAssignmentId++,
+      user_id: userId,
+      name: `Crew ${userId}`,
+      status: "proposed",
+      soft_conflicts: [],
+      hard_blocked: false,
+    }));
+    const updated = { ...found, roster: [...found.roster, ...added] };
+    staffing[missionId] = updated;
+    return HttpResponse.json(updated, { status: 201 });
+  }),
+  http.post("/api/v1/assignments/:id/remove/", ({ params }) => {
+    const assignmentId = Number(params.id);
+    const missionId = Object.keys(staffing)
+      .map(Number)
+      .find((id) => staffing[id].roster.some((r) => r.assignment_id === assignmentId));
+    if (missionId === undefined) {
+      return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    }
+    const found = staffing[missionId];
+    const updated = { ...found, roster: found.roster.filter((r) => r.assignment_id !== assignmentId) };
+    staffing[missionId] = updated;
     return HttpResponse.json(updated);
   }),
 );

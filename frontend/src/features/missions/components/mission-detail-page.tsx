@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import { StaffingPanel } from "@/features/assignments/components/staffing-panel";
 import { useMission } from "@/features/missions/api/missions";
 import { MissionHistory } from "@/features/missions/components/mission-history";
 import { MissionStatusBadge } from "@/features/missions/components/mission-status-badge";
@@ -55,7 +56,7 @@ export function MissionDetailPage() {
 
       <section className="flex flex-col gap-2">
         <h2 className="text-lg font-medium">Staffing</h2>
-        <p className="text-sm text-muted-foreground">Staffing tools arrive in Stage 4.</p>
+        <StaffingPanel missionId={mission.id} />
       </section>
 
       <section className="flex flex-col gap-2">
