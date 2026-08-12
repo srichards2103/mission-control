@@ -12,4 +12,9 @@ def test_seed_demo_idempotent():
     call_command("seed_demo")
     assert Tenant.objects.count() == 2
     assert User.objects.filter(email="director@helios-aerospace.test").exists()
-    assert User.objects.count() == 6
+    from mission_control.missions.models import Mission, MissionStatus
+
+    helios = Tenant.objects.get(slug="helios-aerospace")
+    statuses = set(Mission.objects_unscoped.filter(tenant=helios).values_list("status", flat=True))
+    assert statuses == set(MissionStatus.values)
+    assert User.objects.filter(tenant=helios).count() >= 17  # director + lead + 15 crew
