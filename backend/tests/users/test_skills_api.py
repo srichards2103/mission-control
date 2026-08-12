@@ -68,3 +68,60 @@ def test_lead_cannot_patch(auth_client_for):
     skill = SkillFactory(tenant=lead.tenant, name="Piloting")
     resp = auth_client_for(lead).patch(f"/api/v1/skills/{skill.id}/", {"name": "Hijack"})
     assert resp.status_code == 403
+
+
+# ------------------------------------------------------------- constraint error messages (S1)
+# Every CheckConstraint/UniqueConstraint in the project now carries a
+# `violation_error_message`. Without one, Django's default is the raw
+# 'Constraint “skill_name_per_tenant_uniq” is violated.' -- shown to a director on the
+# most ordinary error in Settings -> Skills, curly quotes and all. No client-side guard
+# can pre-empt it: the rule is case-insensitive and per-tenant.
+
+
+def test_duplicate_skill_name_message_is_human_readable(auth_client_for):
+    director = UserFactory(role=Role.DIRECTOR)
+    SkillFactory(tenant=director.tenant, name="Piloting")
+    resp = auth_client_for(director).post("/api/v1/skills/", {"name": "piloting"})
+    assert resp.status_code == 400
+    messages = resp.data["extra"]["fields"]["__all__"]
+    assert messages == ["A skill with this name already exists."]
+    rendered = str(resp.data)
+    assert "skill_name_per_tenant_uniq" not in rendered
+    assert "Constraint" not in rendered
+
+
+@pytest.mark.parametrize(
+    "model_path,constraint_name",
+    [
+        ("mission_control.users.models.Skill", "skill_name_per_tenant_uniq"),
+        ("mission_control.users.models.Skill", "skill_tenant_id_uniq"),
+        ("mission_control.users.models.User", "users_user_tenant_id_uniq"),
+        ("mission_control.users.models.CrewSkill", "crewskill_proficiency_1_10"),
+        ("mission_control.users.models.CrewSkill", "crewskill_user_skill_uniq"),
+        ("mission_control.missions.models.Mission", "mission_dates_ordered"),
+        ("mission_control.missions.models.Mission", "mission_crew_bounds"),
+        ("mission_control.missions.models.Mission", "mission_tenant_id_uniq"),
+        ("mission_control.missions.models.MissionRequirement", "requirement_proficiency_1_10"),
+        ("mission_control.missions.models.MissionRequirement", "requirement_count_gte_1"),
+        (
+            "mission_control.missions.models.MissionRequirement",
+            "requirement_mission_skill_prof_uniq",
+        ),
+        ("mission_control.missions.models.Assignment", "assignment_live_uniq"),
+    ],
+)
+def test_every_constraint_has_a_human_message(model_path, constraint_name):
+    """The systemic half of the finding: a new constraint added without a message
+    re-opens the same hole, so the whole catalogue is pinned here.
+    """
+    import importlib
+
+    module_name, class_name = model_path.rsplit(".", 1)
+    model = getattr(importlib.import_module(module_name), class_name)
+    constraint = next(
+        c for c in model._meta.constraints if c.name == constraint_name
+    )
+    message = str(constraint.violation_error_message)
+    assert constraint_name not in message
+    assert "is violated" not in message
+    assert message.endswith(".") and message[0].isupper()

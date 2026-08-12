@@ -51,7 +51,11 @@ class User(AbstractBaseUser, BaseModel):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["tenant", "id"], name="users_user_tenant_id_uniq"),
+            models.UniqueConstraint(
+                fields=["tenant", "id"],
+                name="users_user_tenant_id_uniq",
+                violation_error_message="This user does not belong to that organisation.",
+            ),
         ]
 
     def __str__(self):
@@ -65,8 +69,17 @@ class Skill(TenantModel):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(Lower("name"), "tenant", name="skill_name_per_tenant_uniq"),
-            models.UniqueConstraint(fields=["tenant", "id"], name="skill_tenant_id_uniq"),
+            models.UniqueConstraint(
+                Lower("name"),
+                "tenant",
+                name="skill_name_per_tenant_uniq",
+                violation_error_message="A skill with this name already exists.",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant", "id"],
+                name="skill_tenant_id_uniq",
+                violation_error_message="This skill does not belong to that organisation.",
+            ),
         ]
 
     def __str__(self):
@@ -83,6 +96,11 @@ class CrewSkill(TenantModel):
             models.CheckConstraint(
                 condition=Q(proficiency__gte=1) & Q(proficiency__lte=10),
                 name="crewskill_proficiency_1_10",
+                violation_error_message="Proficiency must be between 1 and 10.",
             ),
-            models.UniqueConstraint(fields=["user", "skill"], name="crewskill_user_skill_uniq"),
+            models.UniqueConstraint(
+                fields=["user", "skill"],
+                name="crewskill_user_skill_uniq",
+                violation_error_message="This skill is already listed on the profile.",
+            ),
         ]
