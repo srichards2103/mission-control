@@ -180,4 +180,73 @@ export const server = setupServer(
     missions.push(mission);
     return HttpResponse.json(mission, { status: 201 });
   }),
+  http.put("/api/v1/missions/:id/requirements/", async ({ params, request }) => {
+    const index = missions.findIndex((m) => m.id === Number(params.id));
+    if (index === -1) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    const body = (await request.json()) as {
+      items: { skill_id: number; min_proficiency: number; required_count: number }[];
+    };
+    // Replace the array slot with a new object rather than mutating the found
+    // mission in place — the found object may be `missionFixture` itself
+    // (shared by reference through initialMissions()), and mutating it directly
+    // would leak across tests despite resetMockData() reseeding `missions`.
+    const updated = {
+      ...missions[index],
+      requirements: body.items.map((item, i) => ({
+        id: i + 1,
+        skill_id: item.skill_id,
+        skill_name: skills.find((s) => s.id === item.skill_id)?.name ?? `Skill ${item.skill_id}`,
+        min_proficiency: item.min_proficiency,
+        required_count: item.required_count,
+      })),
+    };
+    missions[index] = updated;
+    return HttpResponse.json(updated);
+  }),
+  http.post("/api/v1/missions/:id/transitions/", async ({ params, request }) => {
+    const index = missions.findIndex((m) => m.id === Number(params.id));
+    if (index === -1) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    const mission = missions[index];
+    const body = (await request.json()) as { action: string; reason?: string };
+    // A light stand-in for the real seven-state FSM (see backend + constraints.md) —
+    // just enough for these components to exercise a real request/response round
+    // trip. The actual guards (permissions, dates, ≥1 requirement, no self-approval)
+    // are backend-tested elsewhere; this mock only needs valid-from-state + reason
+    // presence so tests can assert the UI surfaces a 400's message correctly.
+    const TRANSITIONS: Record<string, { from: string[]; to: string }> = {
+      submit: { from: ["draft"], to: "pending_approval" },
+      approve: { from: ["pending_approval"], to: "approved" },
+      reject: { from: ["pending_approval"], to: "rejected" },
+      revise: { from: ["rejected"], to: "draft" },
+      activate: { from: ["approved"], to: "active" },
+      complete: { from: ["active"], to: "completed" },
+      cancel: { from: ["draft", "pending_approval", "approved", "active"], to: "cancelled" },
+    };
+    const def = TRANSITIONS[body.action];
+    if (!def || !def.from.includes(mission.status)) {
+      return HttpResponse.json(
+        { message: "That transition isn't allowed right now.", extra: {} },
+        { status: 400 },
+      );
+    }
+    if ((body.action === "reject" || body.action === "cancel") && !body.reason) {
+      return HttpResponse.json({ message: "A reason is required.", extra: {} }, { status: 400 });
+    }
+    const updated = {
+      ...mission,
+      status: def.to,
+      history: [
+        ...mission.history,
+        {
+          from_status: mission.status,
+          to_status: def.to,
+          actor_name: "Lead",
+          reason: body.reason ?? "",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    };
+    missions[index] = updated;
+    return HttpResponse.json(updated);
+  }),
 );

@@ -7,6 +7,7 @@ import { ProfilePage } from "@/features/profile/components/profile-page";
 import { CrewListPage } from "@/features/crew/components/crew-list-page";
 import { CrewDetailPage } from "@/features/crew/components/crew-detail-page";
 import { MissionsPage } from "@/features/missions/components/missions-page";
+import { MissionDetailPage } from "@/features/missions/components/mission-detail-page";
 
 function HomeRedirect() {
   const { data: user } = useUser();
@@ -28,6 +29,14 @@ const routes = [
           element: (
             <RequirePermission permission="mission.view">
               <MissionsPage />
+            </RequirePermission>
+          ),
+        },
+        {
+          path: "/missions/:missionId",
+          element: (
+            <RequirePermission permission="mission.view">
+              <MissionDetailPage />
             </RequirePermission>
           ),
         },
