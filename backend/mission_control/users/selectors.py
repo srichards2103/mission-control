@@ -29,3 +29,11 @@ def crew_list():
 
 def crew_get(user_id: int) -> User:
     return get_object_or_404(crew_list(), id=user_id)
+
+
+def user_list():
+    return User.objects.filter(tenant_id=require_current_tenant_id()).order_by("name")
+
+
+def user_get(user_id: int) -> User:
+    return get_object_or_404(user_list(), id=user_id)

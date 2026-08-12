@@ -2,7 +2,7 @@ from django.db import transaction
 
 from mission_control.common.exceptions import ApplicationError
 from mission_control.tenants.context import require_current_tenant_id
-from mission_control.users.models import CrewSkill, Skill
+from mission_control.users.models import CrewSkill, Skill, User
 
 
 def skill_create(*, actor, name: str, description: str = "") -> Skill:
@@ -40,3 +40,36 @@ def crew_skills_set(*, actor, items: list[dict]) -> None:
                   skill_id=item["skill_id"], proficiency=item["proficiency"])
         for item in items
     ])
+
+
+def user_create(*, actor, email: str, name: str, role: str, password: str) -> User:
+    # `email` is globally unique (User is not tenant-scoped), so this existence check
+    # must run across ALL tenants, not just the current one -- that's deliberate, not a
+    # tenancy leak: it only prevents an IntegrityError, it returns no other tenant's data.
+    # Checked explicitly (rather than relying on full_clean()'s validate_unique, which is
+    # case-sensitive) so a same-address-different-case collision also surfaces as the
+    # standard {"message": "Validation error", "extra": {"fields": {...}}} 400 envelope
+    # instead of a raw IntegrityError 500.
+    if User.objects.filter(email__iexact=email).exists():
+        raise ApplicationError(
+            "Validation error",
+            extra={"fields": {"email": ["A user with this email already exists."]}},
+        )
+    user = User.objects.create_user(
+        email=email, password=password, tenant=actor.tenant, role=role, name=name
+    )
+    return user
+
+
+def user_update(
+    *, actor, user: User, role: str | None = None, is_active: bool | None = None
+) -> User:
+    if user == actor:
+        raise ApplicationError("You cannot change your own account.")
+    if role is not None:
+        user.role = role
+    if is_active is not None:
+        user.is_active = is_active
+    user.full_clean()
+    user.save()
+    return user
