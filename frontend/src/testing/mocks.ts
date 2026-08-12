@@ -101,6 +101,58 @@ type Staffing = {
   roster: RosterEntry[];
 };
 
+// Mutable "my assignments" rows for the logged-in crew member, mutated in place by the
+// POST /api/v1/assignments/:id/respond/ handler below — same "reseed in
+// resetMockData()" reasoning as `skills`/`mySkills`/`missions`/`staffing` above.
+type MyAssignment = {
+  id: number;
+  status: "proposed" | "accepted" | "declined" | "removed";
+  decline_reason: string;
+  responded_at: string | null;
+  mission: {
+    id: number;
+    name: string;
+    status: string;
+    start_date: string;
+    end_date: string;
+    description: string;
+  };
+};
+
+function initialMyAssignments(): MyAssignment[] {
+  return [
+    {
+      id: 1,
+      status: "proposed",
+      decline_reason: "",
+      responded_at: null,
+      mission: {
+        id: 10,
+        name: "Ganymede Survey",
+        status: "draft",
+        start_date: "2026-09-01",
+        end_date: "2026-09-30",
+        description: "Survey the icy moon for viable ice-mining sites.",
+      },
+    },
+    {
+      id: 2,
+      status: "accepted",
+      decline_reason: "",
+      responded_at: "2026-08-01T12:00:00Z",
+      mission: {
+        id: 11,
+        name: "Titan Cartography",
+        status: "approved",
+        start_date: "2026-10-01",
+        end_date: "2026-10-15",
+        description: "Map Titan's methane lakes.",
+      },
+    },
+  ];
+}
+let myAssignments = initialMyAssignments();
+
 function initialStaffing(): Record<number, Staffing> {
   return {
     10: {
@@ -130,6 +182,7 @@ export function resetMockData() {
   mySkills = initialMySkills();
   missions = initialMissions();
   staffing = initialStaffing();
+  myAssignments = initialMyAssignments();
 }
 
 export const server = setupServer(
@@ -348,6 +401,30 @@ export const server = setupServer(
     const found = staffing[missionId];
     const updated = { ...found, roster: found.roster.filter((r) => r.assignment_id !== assignmentId) };
     staffing[missionId] = updated;
+    return HttpResponse.json(updated);
+  }),
+  http.get("/api/v1/me/assignments/", () =>
+    HttpResponse.json({ results: myAssignments, count: myAssignments.length, limit: 100, offset: 0 })),
+  http.post("/api/v1/assignments/:id/respond/", async ({ params, request }) => {
+    const assignmentId = Number(params.id);
+    const index = myAssignments.findIndex((a) => a.id === assignmentId);
+    if (index === -1) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    const current = myAssignments[index];
+    // Mirrors the real backend rule: only a `proposed` assignment can be responded to.
+    if (current.status !== "proposed") {
+      return HttpResponse.json(
+        { message: "This assignment can no longer be responded to.", extra: {} },
+        { status: 400 },
+      );
+    }
+    const body = (await request.json()) as { action: "accept" | "decline"; reason?: string };
+    const updated: MyAssignment = {
+      ...current,
+      status: body.action === "accept" ? "accepted" : "declined",
+      decline_reason: body.action === "decline" ? (body.reason ?? "") : "",
+      responded_at: new Date().toISOString(),
+    };
+    myAssignments[index] = updated;
     return HttpResponse.json(updated);
   }),
 );

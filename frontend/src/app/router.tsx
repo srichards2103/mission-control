@@ -8,6 +8,7 @@ import { CrewListPage } from "@/features/crew/components/crew-list-page";
 import { CrewDetailPage } from "@/features/crew/components/crew-detail-page";
 import { MissionsPage } from "@/features/missions/components/missions-page";
 import { MissionDetailPage } from "@/features/missions/components/mission-detail-page";
+import { MyAssignmentsPage } from "@/features/assignments/components/my-assignments-page";
 
 function HomeRedirect() {
   const { data: user } = useUser();
@@ -56,7 +57,14 @@ const routes = [
             </RequirePermission>
           ),
         },
-        { path: "/my-assignments", element: <h1>My Assignments</h1> }, // Stage 4
+        {
+          path: "/my-assignments",
+          element: (
+            <RequirePermission permission="assignment.respond">
+              <MyAssignmentsPage />
+            </RequirePermission>
+          ),
+        },
         {
           path: "/my-profile",
           element: (
