@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { AxiosError } from "axios";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useSetRequirements, type MissionDetail } from "@/features/missions/api/missions";
 import { useSkills } from "@/features/skills/api/skills";
-import { errorMessage } from "@/lib/api-errors";
+import { errorMessage, rowErrorsFrom } from "@/lib/api-errors";
 
 const PROFICIENCIES = Array.from({ length: 10 }, (_, i) => i + 1);
 // Default proficiency/count for a newly added row: the minimum valid values, so a
@@ -25,24 +24,6 @@ function toRows(requirements: MissionDetail["requirements"]): Row[] {
     min_proficiency,
     required_count,
   }));
-}
-
-// The backend reports list-input validation errors keyed by item index (see
-// constraints.md gotcha #2), e.g. extra.fields.items = [{"skill_id": ["..."]}, {}].
-// fieldErrorsFrom() only understands the flat scalar shape, so this list-shaped one
-// is unwrapped here rather than in the shared helper.
-function rowErrorsFrom(err: unknown): Record<number, string[]> {
-  if (!(err instanceof AxiosError)) return {};
-  const items = err.response?.data?.extra?.fields?.items;
-  if (!Array.isArray(items)) return {};
-  const messages: Record<number, string[]> = {};
-  items.forEach((item, index) => {
-    if (item && typeof item === "object") {
-      const rowMessages = Object.values(item as Record<string, string[]>).flat();
-      if (rowMessages.length > 0) messages[index] = rowMessages;
-    }
-  });
-  return messages;
 }
 
 export function RequirementsEditor({ mission }: { mission: MissionDetail }) {

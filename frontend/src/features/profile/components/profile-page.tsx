@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMySkills, useSetMySkills, type MySkill } from "@/features/profile/api/profile";
 import { useSkills } from "@/features/skills/api/skills";
-import { errorMessage } from "@/lib/api-errors";
+import { errorMessage, rowErrorsFrom } from "@/lib/api-errors";
 
 const PROFICIENCIES = Array.from({ length: 10 }, (_, i) => i + 1);
 // Default proficiency for a newly added row: 1 (the minimum valid value), so a
@@ -25,6 +25,9 @@ export function ProfilePage() {
   // without clobbering in-flight edits if the invalidated query refetches later.
   const [draft, setDraft] = useState<MySkill[] | null>(null);
   const [pendingSkillId, setPendingSkillId] = useState<string>("");
+  // Row-index-keyed validation errors from the last failed save (e.g. proficiency
+  // out of range on one specific row) -- see rowErrorsFrom() in lib/api-errors.ts.
+  const [rowErrors, setRowErrors] = useState<Record<number, string[]>>({});
 
   useEffect(() => {
     if (mySkills && draft === null) setDraft(mySkills);
@@ -66,6 +69,7 @@ export function ProfilePage() {
   }
 
   async function handleSave() {
+    setRowErrors({});
     try {
       // Send exactly the draft — including an empty array when every row has been
       // removed, which the server treats as "wipe the profile" (a real, supported
@@ -77,7 +81,11 @@ export function ProfilePage() {
       toast.success("Profile saved");
     } catch (err) {
       // Draft is left exactly as the user had it — a failed save must be recoverable,
-      // not silently reset or discarded.
+      // not silently reset or discarded. PUT /api/v1/me/skills/ takes a bulk `items`
+      // array, so a per-row validation error (e.g. proficiency out of range on one
+      // skill) comes back index-keyed rather than under a flat field name -- surface
+      // it against the right row rather than just a generic toast.
+      setRowErrors(rowErrorsFrom(err));
       toast.error(errorMessage(err));
     }
   }
@@ -94,9 +102,16 @@ export function ProfilePage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {draft.map((row) => (
+          {draft.map((row, index) => (
             <TableRow key={row.skill_id}>
-              <TableCell>{row.skill_name}</TableCell>
+              <TableCell>
+                {row.skill_name}
+                {rowErrors[index] && (
+                  <p role="alert" className="text-xs text-destructive">
+                    {rowErrors[index].join(" ")}
+                  </p>
+                )}
+              </TableCell>
               <TableCell>
                 <Select
                   value={String(row.proficiency)}

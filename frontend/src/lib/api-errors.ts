@@ -42,6 +42,42 @@ export function errorMessage(err: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
+// Row-indexed validation errors, for list-shaped write endpoints (PUT .../me/skills/,
+// PUT .../missions/<id>/requirements/) whose body is a bulk array of rows. Those
+// endpoints report validation errors keyed by the row's index rather than a flat field
+// name, so fieldErrorsFrom() alone can't place them. Two shapes are live on the
+// backend today, and this handles both:
+//  - PUT /api/v1/me/skills/: extra.fields is itself keyed by stringified row index,
+//    e.g. {"1": {"proficiency": ["Ensure this value is less than or equal to 10."]}}
+//    -- the request body IS the list (no wrapping key), so the error isn't wrapped
+//    either.
+//  - PUT /api/v1/missions/<id>/requirements/: the same index-keyed shape, but one
+//    level deeper under "items" (extra.fields.items = {"1": {...}}), because the
+//    request body is {"items": [...]}.
+// Any future bulk-list endpoint should follow one of these two shapes -- this handles
+// both so nobody needs a third private copy (see requirements-editor.tsx's history:
+// it had its own before this was promoted here).
+export function rowErrorsFrom(err: unknown): Record<number, string[]> {
+  if (!(err instanceof AxiosError)) return {};
+  const fields = err.response?.data?.extra?.fields;
+  if (!fields || typeof fields !== "object") return {};
+  const record = fields as Record<string, unknown>;
+  const items = record.items;
+  const container = items && typeof items === "object" ? items : fields;
+
+  const messages: Record<number, string[]> = {};
+  for (const [key, value] of Object.entries(container as Record<string, unknown>)) {
+    const index = Number(key);
+    // Only numeric keys are row indices -- this also naturally excludes "__all__" /
+    // "non_field_errors" and any genuine flat field name (e.g. "name") from being
+    // misread as a row.
+    if (!Number.isInteger(index) || !value || typeof value !== "object") continue;
+    const rowMessages = Object.values(value as Record<string, string[]>).flat();
+    if (rowMessages.length > 0) messages[index] = rowMessages;
+  }
+  return messages;
+}
+
 export function fieldErrorsFrom(err: unknown): Record<string, string[]> {
   if (err instanceof AxiosError) {
     const fields = err.response?.data?.extra?.fields;

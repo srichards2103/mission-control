@@ -131,6 +131,56 @@ describe("my-profile", () => {
     expect(screen.queryByText("Piloting")).not.toBeInTheDocument();
   });
 
+  it("surfaces a row-indexed validation error against the right row, not just a generic toast", async () => {
+    server.use(http.get("/api/v1/auth/me/", () => HttpResponse.json(crewUser)));
+    server.use(
+      http.get("/api/v1/skills/", () =>
+        HttpResponse.json({
+          results: [
+            { id: 1, name: "Piloting", description: "", is_archived: false },
+            { id: 2, name: "Navigation", description: "", is_archived: false },
+          ],
+          count: 2,
+          limit: 25,
+          offset: 0,
+        }),
+      ),
+    );
+    server.use(
+      // Exact shape captured live from PUT /api/v1/me/skills/: extra.fields is itself
+      // keyed by stringified row index (the request body IS the items list, no
+      // wrapping key) -- distinct from the requirements editor's extra.fields.items
+      // shape. Row 1 (Navigation, the second row added below) is the one at fault.
+      http.put("/api/v1/me/skills/", () =>
+        HttpResponse.json(
+          {
+            message: "Validation error",
+            extra: { fields: { "1": { proficiency: ["Ensure this value is less than or equal to 10."] } } },
+          },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderAt("/my-profile");
+
+    expect(await screen.findByText("Piloting")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("combobox", { name: /add a skill/i }));
+    await userEvent.click(await screen.findByRole("option", { name: "Navigation" }));
+    expect(await screen.findByText("Navigation")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    const rowError = await screen.findByText(/ensure this value is less than or equal to 10/i);
+    expect(rowError).toBeInTheDocument();
+    // It's attached to Navigation's row (index 1), not Piloting's (index 0) -- the
+    // point of row-level parsing over a bare toast.
+    expect(rowError.closest("tr")).toHaveTextContent("Navigation");
+    const pilotingRow = screen.getByText("Piloting").closest("tr");
+    expect(pilotingRow).not.toHaveTextContent(/ensure this value/i);
+    // The draft survives a failed save, same as the flat-error case above.
+    expect(screen.getByText("Piloting")).toBeInTheDocument();
+  });
+
   it("shows an error state instead of an empty profile when it fails to load", async () => {
     server.use(http.get("/api/v1/auth/me/", () => HttpResponse.json(crewUser)));
     server.use(

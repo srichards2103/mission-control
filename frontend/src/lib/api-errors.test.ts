@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "@/testing/server";
 import { api } from "./api-client";
-import { errorMessage, fieldErrorsFrom } from "./api-errors";
+import { errorMessage, fieldErrorsFrom, rowErrorsFrom } from "./api-errors";
 
 // Drives a real request through the real axios client and MSW so we get a genuine
 // AxiosError, rather than hand-constructing one (which risks not matching the shape
@@ -100,5 +100,55 @@ describe("fieldErrorsFrom", () => {
 
   it("returns an empty object for a non-AxiosError value", () => {
     expect(fieldErrorsFrom(new Error("boom"))).toEqual({});
+  });
+});
+
+describe("rowErrorsFrom", () => {
+  it("reads the unwrapped shape (extra.fields keyed directly by row index) -- PUT /api/v1/me/skills/", async () => {
+    // Exact payload captured live: PUT /api/v1/me/skills/ takes a bulk `items` array
+    // as the whole request body, so the row-index keys sit directly under extra.fields.
+    const err = await captureError(400, {
+      message: "Validation error",
+      extra: { fields: { "1": { proficiency: ["Ensure this value is less than or equal to 10."] } } },
+    });
+    expect(rowErrorsFrom(err)).toEqual({ 1: ["Ensure this value is less than or equal to 10."] });
+  });
+
+  it("reads the wrapped shape (extra.fields.items keyed by row index) -- PUT /api/v1/missions/:id/requirements/", async () => {
+    // Exact payload captured live: the request body is {"items": [...]}, so the
+    // row-index keys sit one level deeper, under "items".
+    const err = await captureError(400, {
+      message: "Validation error",
+      extra: { fields: { items: { "1": { min_proficiency: ["Ensure this value is less than or equal to 10."] } } } },
+    });
+    expect(rowErrorsFrom(err)).toEqual({ 1: ["Ensure this value is less than or equal to 10."] });
+  });
+
+  it("collects multiple failing rows, each keyed by its own index", async () => {
+    const err = await captureError(400, {
+      message: "Validation error",
+      extra: {
+        fields: {
+          "0": { skill_id: ["This skill does not exist."] },
+          "2": { proficiency: ["Ensure this value is greater than or equal to 1."] },
+        },
+      },
+    });
+    expect(rowErrorsFrom(err)).toEqual({
+      0: ["This skill does not exist."],
+      2: ["Ensure this value is greater than or equal to 1."],
+    });
+  });
+
+  it("does not misread a flat field-keyed error as row-indexed", async () => {
+    const err = await captureError(400, {
+      message: "Validation error",
+      extra: { fields: { name: ["This field may not be blank."] } },
+    });
+    expect(rowErrorsFrom(err)).toEqual({});
+  });
+
+  it("returns an empty object for a non-AxiosError value", () => {
+    expect(rowErrorsFrom(new Error("boom"))).toEqual({});
   });
 });
