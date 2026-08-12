@@ -128,6 +128,21 @@ def assignment_respond(
     if assignment.status != AssignmentStatus.PROPOSED:
         raise ApplicationError("This assignment has already been responded to.")
     if action == "accept":
+        # Availability is re-checked HERE, not only at propose time: a proposal can be
+        # outstanding for arbitrarily long, and in the meantime a *different* mission
+        # this crew member already accepted can be approved, hard-blocking them. The
+        # propose-time check would then be stale, and accepting would manufacture the
+        # one state the rest of the system assumes impossible -- two accepted
+        # assignments on overlapping approved/active missions (spec §9's "first-approved
+        # wins the reservation"). Same single-source predicate as propose, with the same
+        # `exclude_mission_id` reasoning: this mission's own crew must not block itself.
+        blocked = hard_blocked_user_ids(
+            start_date=assignment.mission.start_date,
+            end_date=assignment.mission.end_date,
+            exclude_mission_id=assignment.mission_id,
+        )
+        if actor.id in blocked:
+            raise ApplicationError("You are already committed to an overlapping mission.")
         assignment.status = AssignmentStatus.ACCEPTED
     elif action == "decline":
         assignment.status = AssignmentStatus.DECLINED

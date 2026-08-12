@@ -5,10 +5,14 @@ import pytest
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 
-from mission_control.missions.factories import AssignmentFactory, MissionFactory
+from mission_control.missions.factories import (
+    AssignmentFactory,
+    MissionFactory,
+    MissionRequirementFactory,
+)
 from mission_control.missions.models import Assignment, AssignmentStatus, MissionStatus
 from mission_control.tenants.context import set_current_tenant_id
-from mission_control.users.factories import UserFactory
+from mission_control.users.factories import CrewSkillFactory, SkillFactory, UserFactory
 from mission_control.users.roles import Role
 
 pytestmark = pytest.mark.django_db
@@ -365,3 +369,109 @@ def test_cross_tenant_assignment_remove_404(auth_client_for):
     other = AssignmentFactory()  # different tenant
     resp = auth_client_for(lead).post(f"/api/v1/assignments/{other.id}/remove/")
     assert resp.status_code == 404
+
+
+# ------------------------------------------------------------------- accept-time availability
+# C1 (final whole-branch review): `assignment_respond` used to check only ownership,
+# mission-not-terminal and status-is-proposed. A proposal outstanding while a competing
+# mission got approved went stale, and accepting it created the one state the rest of the
+# system treats as impossible: two accepted assignments on overlapping approved missions.
+
+
+def _double_booking_setup(auth_client_for):
+    """Steps 1-3 of the C1 sequence: C proposed on two overlapping missions, both
+    approved, C accepted on A only. Returns (tenant, crew_c, pending accept on B).
+    """
+    today = dt.date.today()
+    lead = UserFactory(role=Role.MISSION_LEAD)
+    tenant = lead.tenant
+    director = UserFactory(role=Role.DIRECTOR, tenant=tenant)
+    set_current_tenant_id(tenant.id)
+    skill = SkillFactory(tenant=tenant)
+    crew_c = UserFactory(role=Role.CREW_MEMBER, tenant=tenant, name="Cass")
+    crew_d = UserFactory(role=Role.CREW_MEMBER, tenant=tenant, name="Dee")
+    CrewSkillFactory(user=crew_c, skill=skill, proficiency=5)
+    CrewSkillFactory(user=crew_d, skill=skill, proficiency=5)
+
+    def make_mission():
+        mission = MissionFactory(
+            tenant=tenant, created_by=lead, min_crew=1, max_crew=3,
+            start_date=today, end_date=today + dt.timedelta(days=89),
+        )
+        MissionRequirementFactory(
+            mission=mission, skill=skill, min_proficiency=1, required_count=1
+        )
+        return mission
+
+    mission_a, mission_b = make_mission(), make_mission()
+    lead_client = auth_client_for(lead)
+    director_client = auth_client_for(director)
+    c_client = auth_client_for(crew_c)
+
+    # 1. Both missions are drafts, so neither hard-blocks: C is proposed on both.
+    for mission in (mission_a, mission_b):
+        assert lead_client.post(
+            f"/api/v1/missions/{mission.id}/assignments/", {"user_ids": [crew_c.id]},
+            format="json",
+        ).status_code == 201
+    # B is independently staffed by D, so B's approve guard passes without C accepting.
+    assert lead_client.post(
+        f"/api/v1/missions/{mission_b.id}/assignments/", {"user_ids": [crew_d.id]}, format="json"
+    ).status_code == 201
+
+    a_id = Assignment.objects_unscoped.get(mission=mission_a, user=crew_c).id
+    b_id = Assignment.objects_unscoped.get(mission=mission_b, user=crew_c).id
+    d_id = Assignment.objects_unscoped.get(mission=mission_b, user=crew_d).id
+
+    # 2. C accepts A; A is submitted and approved -- C is now hard-blocked.
+    assert c_client.post(
+        f"/api/v1/assignments/{a_id}/respond/", {"action": "accept"}
+    ).status_code == 200
+    assert auth_client_for(crew_d).post(
+        f"/api/v1/assignments/{d_id}/respond/", {"action": "accept"}
+    ).status_code == 200
+
+    # 3. Both missions are submitted and approved. B's approve guard passes because
+    #    `staffing_validation_errors` inspects only *accepted* assignments, and C is
+    #    merely *proposed* on B.
+    for mission in (mission_a, mission_b):
+        assert lead_client.post(
+            f"/api/v1/missions/{mission.id}/transitions/", {"action": "submit"}
+        ).status_code == 200
+        assert director_client.post(
+            f"/api/v1/missions/{mission.id}/transitions/", {"action": "approve"}
+        ).status_code == 200
+
+    return tenant, crew_c, c_client, b_id
+
+
+def test_accept_is_rejected_when_a_competing_mission_was_approved_in_the_interim(
+    auth_client_for,
+):
+    tenant, crew_c, c_client, b_id = _double_booking_setup(auth_client_for)
+
+    # 4. C accepts on B. Before the fix this succeeded, double-booking C.
+    resp = c_client.post(f"/api/v1/assignments/{b_id}/respond/", {"action": "accept"})
+    assert resp.status_code == 400
+    assert "overlapping" in resp.data["message"]
+    assert Assignment.objects_unscoped.get(id=b_id).status == AssignmentStatus.PROPOSED
+    # Declining a stale proposal is still allowed -- it is the way out of this state.
+    assert c_client.post(
+        f"/api/v1/assignments/{b_id}/respond/", {"action": "decline", "reason": "Booked"}
+    ).status_code == 200
+
+
+def test_crew_utilization_never_exceeds_100_percent(auth_client_for):
+    """The double-booking above is what let `crew_utilization` report >100%: two
+    accepted assignments on overlapping approved missions double-count the same days.
+    """
+    from mission_control.missions.selectors.dashboard import crew_utilization
+
+    tenant, crew_c, c_client, b_id = _double_booking_setup(auth_client_for)
+    c_client.post(f"/api/v1/assignments/{b_id}/respond/", {"action": "accept"})
+
+    set_current_tenant_id(tenant.id)
+    data = crew_utilization(window_days=90)
+    assert data["crew"], "expected the crew roster to be non-empty"
+    assert all(row["utilization_pct"] <= 100 for row in data["crew"]), data["crew"]
+    assert data["org_utilization_pct"] <= 100
