@@ -20,9 +20,6 @@ SECRET_KEY = (
 )
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
 
-# mission_control.missions is appended in Stage 3 (once that app exists). Listing an
-# app before its package exists breaks django.setup(), which pytest-django runs
-# before test collection, so INSTALLED_APPS only lists apps that exist as of this task.
 INSTALLED_APPS = [
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -31,6 +28,7 @@ INSTALLED_APPS = [
     "mission_control.common",
     "mission_control.tenants",
     "mission_control.users",
+    "mission_control.missions",
 ]
 
 MIDDLEWARE = [

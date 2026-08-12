@@ -1,3 +1,6 @@
 from django.urls import include, path
 
-urlpatterns = [path("api/v1/", include("mission_control.users.urls"))]
+urlpatterns = [
+    path("api/v1/", include("mission_control.users.urls")),
+    path("api/v1/", include("mission_control.missions.urls")),
+]
