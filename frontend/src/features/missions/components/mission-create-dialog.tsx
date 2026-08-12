@@ -36,9 +36,31 @@ export function MissionCreateDialog() {
     setFieldErrors({});
   }
 
+  // Mirrors the backend's two CHECK constraints (mission_dates_ordered,
+  // mission_crew_bounds) so the obviously-invalid case is caught before the round
+  // trip. The server's full_clean() still enforces these authoritatively — this is
+  // just a fast client-side echo of the same rule, not a replacement for it.
+  function clientValidationErrors(): string[] {
+    const errors: string[] = [];
+    if (startDate && endDate && endDate < startDate) {
+      errors.push("End date must be on or after the start date.");
+    }
+    const min = Number(minCrew);
+    const max = Number(maxCrew);
+    if (Number.isFinite(min) && Number.isFinite(max) && max < min) {
+      errors.push("Max crew must be at least min crew.");
+    }
+    return errors;
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setFieldErrors({});
+    const clientErrors = clientValidationErrors();
+    if (clientErrors.length > 0) {
+      setFieldErrors({ non_field_errors: clientErrors });
+      return;
+    }
     try {
       await createMission.mutateAsync({
         name,
@@ -145,6 +167,11 @@ export function MissionCreateDialog() {
               )}
             </div>
           </div>
+          {fieldErrors.non_field_errors && (
+            <p role="alert" className="text-sm text-destructive">
+              {fieldErrors.non_field_errors.join(" ")}
+            </p>
+          )}
           <DialogFooter>
             <Button type="submit" disabled={createMission.isPending}>
               {createMission.isPending ? "Creating…" : "Create mission"}

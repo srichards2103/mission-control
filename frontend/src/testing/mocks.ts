@@ -53,9 +53,18 @@ export const missionFixture = {
   history: [] as unknown[],
 };
 
+// Mutable mission list, mutated in place by the POST /api/v1/missions/ handler below
+// so a created mission actually shows up on the next GET /api/v1/missions/ — the same
+// "reseed in resetMockData()" reasoning as `skills`/`mySkills` above.
+function initialMissions() {
+  return [missionFixture];
+}
+let missions = initialMissions();
+
 export function resetMockData() {
   skills = initialSkills();
   mySkills = initialMySkills();
+  missions = initialMissions();
 }
 
 export const server = setupServer(
@@ -114,13 +123,61 @@ export const server = setupServer(
     const url = new URL(request.url);
     const status = url.searchParams.get("status");
     const search = url.searchParams.get("search");
-    let results = [missionFixture];
+    let results = missions;
     if (status) results = results.filter((m) => m.status === status);
     if (search) results = results.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
     return HttpResponse.json({ results, count: results.length, limit: 100, offset: 0 });
   }),
   http.get("/api/v1/missions/:id/", ({ params }) => {
-    if (Number(params.id) === missionFixture.id) return HttpResponse.json(missionFixture);
-    return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    const mission = missions.find((m) => m.id === Number(params.id));
+    if (!mission) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    return HttpResponse.json(mission);
+  }),
+  http.post("/api/v1/missions/", async ({ request }) => {
+    const body = (await request.json()) as {
+      name: string;
+      description?: string;
+      start_date: string;
+      end_date: string;
+      min_crew: number;
+      max_crew: number;
+    };
+    // Mirrors the two real backend CHECK constraints (mission_dates_ordered,
+    // mission_crew_bounds), which full_clean() reports as extra.fields.non_field_errors
+    // under the generic top-level message "Validation error" — this is the shape a real
+    // 400 from this endpoint takes, and is what src/lib/api-errors.ts must unwrap.
+    if (body.end_date < body.start_date) {
+      return HttpResponse.json(
+        {
+          message: "Validation error",
+          extra: { fields: { non_field_errors: ["End date must be on or after the start date."] } },
+        },
+        { status: 400 },
+      );
+    }
+    if (body.max_crew < body.min_crew) {
+      return HttpResponse.json(
+        {
+          message: "Validation error",
+          extra: { fields: { non_field_errors: ["Max crew must be greater than or equal to min crew."] } },
+        },
+        { status: 400 },
+      );
+    }
+    const mission = {
+      id: Math.max(0, ...missions.map((m) => m.id)) + 1,
+      name: body.name,
+      status: "draft",
+      description: body.description ?? "",
+      start_date: body.start_date,
+      end_date: body.end_date,
+      min_crew: body.min_crew,
+      max_crew: body.max_crew,
+      created_by: { id: 1, name: "Lead" },
+      requirements: [],
+      history: [],
+    };
+    missions.push(mission);
+    return HttpResponse.json(mission, { status: 201 });
   }),
 );
