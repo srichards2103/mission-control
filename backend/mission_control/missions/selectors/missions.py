@@ -1,7 +1,13 @@
 from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 
-from mission_control.missions.models import Mission, MissionStatus, MissionTransition
+from mission_control.missions.models import (
+    LIVE_ASSIGNMENT_STATUSES,
+    Assignment,
+    Mission,
+    MissionStatus,
+    MissionTransition,
+)
 
 
 def mission_list(*, status: str | None = None, search: str | None = None) -> QuerySet[Mission]:
@@ -36,4 +42,18 @@ def mission_submitter_id(mission: Mission) -> int | None:
         .order_by("-created_at", "-id")
         .values_list("actor_id", flat=True)
         .first()
+    )
+
+
+def my_assignments(user) -> QuerySet[Assignment]:
+    """A crew member's own assignments, newest first, for `/me/assignments/`."""
+    return Assignment.objects.filter(user=user).select_related("mission").order_by("-created_at")
+
+
+def mission_assignments(mission: Mission) -> QuerySet[Assignment]:
+    """A mission's live (proposed/accepted) assignments -- the staffing roster."""
+    return (
+        Assignment.objects.filter(mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES)
+        .select_related("user")
+        .order_by("-created_at")
     )
