@@ -1,7 +1,8 @@
 import { createBrowserRouter, createMemoryRouter, Navigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
-import { ProtectedRoute, hasPermission, useUser } from "@/lib/auth";
+import { ProtectedRoute, RequirePermission, hasPermission, useUser } from "@/lib/auth";
 import { LoginForm } from "@/features/auth/components/login-form";
+import { SettingsPage } from "@/features/settings/components/settings-page";
 
 function HomeRedirect() {
   const { data: user } = useUser();
@@ -22,7 +23,14 @@ const routes = [
         { path: "/crew", element: <h1>Crew</h1> },                  // Stage 2
         { path: "/my-assignments", element: <h1>My Assignments</h1> }, // Stage 4
         { path: "/my-profile", element: <h1>My Profile</h1> },      // Stage 2
-        { path: "/settings", element: <h1>Settings</h1> },          // Stage 2
+        {
+          path: "/settings",
+          element: (
+            <RequirePermission permission="settings.view">
+              <SettingsPage />
+            </RequirePermission>
+          ),
+        },
       ],
     }],
   },
