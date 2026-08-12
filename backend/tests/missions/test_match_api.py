@@ -3,6 +3,7 @@ import datetime as dt
 import pytest
 
 from mission_control.missions.factories import MissionFactory, MissionRequirementFactory
+from mission_control.missions.services.matching import NO_QUALIFIED_CREW
 from mission_control.users.factories import CrewSkillFactory, SkillFactory, UserFactory
 from mission_control.users.roles import Role
 
@@ -76,3 +77,31 @@ def test_response_shape_matches_dataclass_field_names(auth_client_for):
 
     for alt in resp.data["alternatives"]:
         assert set(alt.keys()) == {"requirement_id", "skill_name", "min_proficiency", "candidates"}
+
+
+def test_response_shape_for_unfilled_seat(auth_client_for):
+    """No crew qualifies for the requirement at all, so match_mission reports an
+    UnfilledSeat with reason NO_QUALIFIED_CREW -- assert the payload's serialization of
+    that dataclass by name, not just the happy-path ProposedMember shape above."""
+    lead = UserFactory(role=Role.MISSION_LEAD)
+    mission = MissionFactory(
+        tenant=lead.tenant,
+        created_by=lead,
+        start_date=dt.date(2026, 9, 1),
+        end_date=dt.date(2026, 9, 10),
+        min_crew=1,
+        max_crew=1,
+    )
+    skill = SkillFactory(tenant=lead.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=5)
+    # No crew with this skill exists at all -- nobody qualifies.
+
+    resp = auth_client_for(lead).post(f"/api/v1/missions/{mission.id}/match/")
+    assert resp.status_code == 200
+    assert resp.data["team"] == []
+    assert len(resp.data["unfilled_seats"]) == 1
+    unfilled = resp.data["unfilled_seats"][0]
+    assert set(unfilled.keys()) == {"requirement_id", "skill_name", "min_proficiency", "reason"}
+    assert unfilled["skill_name"] == "Piloting"
+    assert unfilled["min_proficiency"] == 5
+    assert unfilled["reason"] == NO_QUALIFIED_CREW

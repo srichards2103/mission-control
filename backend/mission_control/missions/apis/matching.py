@@ -4,20 +4,61 @@ Read-only -- `match_mission` makes no assignments (see its docstring: it is pure
 this endpoint calls it directly and serialises the result. No service, no write.
 """
 
-import dataclasses
-
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from mission_control.common.exceptions import ApplicationError
-from mission_control.missions.models import MissionStatus
 from mission_control.missions.selectors import missions as mission_selectors
-from mission_control.missions.services.matching import match_mission
+from mission_control.missions.services.assignments import TERMINAL
+from mission_control.missions.services.matching import MatchResult, match_mission
 from mission_control.users.permissions import Permission, ensure_permission
 
-#: Mirrors `missions.services.assignments.TERMINAL` -- matching a mission that can no
-#: longer be staffed is meaningless, same as proposing an assignment to one.
-TERMINAL = frozenset({MissionStatus.COMPLETED, MissionStatus.CANCELLED})
+
+def match_payload(result: MatchResult) -> dict:
+    """The wire shape of a `MatchResult`, mirroring `assignments.staffing_payload`.
+
+    Fields are enumerated by hand rather than `dataclasses.asdict`, so this function is
+    the one place the API contract is written down: an internal-bookkeeping field added
+    to `ProposedMember`/`UnfilledSeat`/`RequirementAlternatives`/`MatchResult` later
+    does not silently reach the wire, and Task 5.3's zod schemas have something
+    explicit to be checked against. `seats`, `breakdown`, `soft_conflicts` and
+    `candidates` are already plain dicts built by the engine (not further dataclasses),
+    so -- as `staffing_payload` does for its own `soft_conflicts` -- they pass through
+    unchanged.
+    """
+    return {
+        "team": [
+            {
+                "user_id": member.user_id,
+                "name": member.name,
+                "seats": member.seats,
+                "score": member.score,
+                "breakdown": member.breakdown,
+                "workload_days": member.workload_days,
+                "soft_conflicts": member.soft_conflicts,
+            }
+            for member in result.team
+        ],
+        "unfilled_seats": [
+            {
+                "requirement_id": seat.requirement_id,
+                "skill_name": seat.skill_name,
+                "min_proficiency": seat.min_proficiency,
+                "reason": seat.reason,
+            }
+            for seat in result.unfilled_seats
+        ],
+        "alternatives": [
+            {
+                "requirement_id": alt.requirement_id,
+                "skill_name": alt.skill_name,
+                "min_proficiency": alt.min_proficiency,
+                "candidates": alt.candidates,
+            }
+            for alt in result.alternatives
+        ],
+        "open_capacity": result.open_capacity,
+    }
 
 
 class MissionMatchApi(APIView):
@@ -26,4 +67,4 @@ class MissionMatchApi(APIView):
         mission = mission_selectors.mission_get(mission_id)
         if mission.status in TERMINAL:
             raise ApplicationError("Cannot match a completed or cancelled mission.")
-        return Response(dataclasses.asdict(match_mission(mission)))
+        return Response(match_payload(match_mission(mission)))
