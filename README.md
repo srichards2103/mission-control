@@ -44,10 +44,16 @@ SECRET_KEY=$(openssl rand -hex 32) docker compose up --build
 ```
 
 Open **http://localhost:80**. `docker-compose.yml` fails closed without `SECRET_KEY` set — this is
-deliberate, so a production-shaped stack can never boot on the placeholder dev key.
+deliberate, so a production-shaped stack can never boot on the placeholder dev key. Instead of the
+inline `SECRET_KEY=...` above, you can copy [`.env.example`](.env.example) to `.env` (Compose auto-loads
+it) and fill in `SECRET_KEY` (and optionally `ALLOWED_HOSTS`) there.
 
 Both compose files provision Postgres 16, wait for its healthcheck, then run `migrate` and `seed_demo`
 before serving. Re-running either command is safe: the seed is idempotent.
+
+Only `SECRET_KEY` fails closed — the Postgres credentials (`mission`/`mission`) are hardcoded in both
+compose files with no override path. Exposure is low: the prod `db` service publishes no host port, so
+it's reachable only from other containers on the compose network, not from the host or outside.
 
 To seed by hand against an already-running stack (e.g. after wiping the database), run the same command
 the containers run:
@@ -125,7 +131,7 @@ backend/mission_control/
 frontend/src/
   app/            # router, providers
   components/ui/  # shadcn primitives
-  features/       # auth, missions, crew, skills, assignments, matching, dashboard, settings
+  features/       # auth, missions, crew, skills, assignments, matching, dashboard, settings, profile
   lib/            # axios client + interceptors, auth/permission hook
 ```
 
@@ -196,12 +202,11 @@ Recorded here rather than left for a reviewer to discover:
   seeded demo's scale (a handful of live missions per tenant) this is unnoticeable; at real scale it
   would need a batched `mission_coverage_batch()` added to `selectors/staffing.py`. The dashboard's other
   three widgets (pipeline, crew utilisation, skill gaps) are all genuinely O(1).
-- **Some database CHECK-constraint violations surface developer-facing text.** A handful of model
-  `CheckConstraint`s (e.g. `mission_dates_ordered`, `mission_crew_bounds`) don't set
-  `violation_error_message`, so if one is ever hit outside the guarded happy path, the error text a user
-  sees is Postgres's own message (e.g. `Constraint "mission_dates_ordered" is violated.`) rather than a
-  friendly sentence. In practice every form validates these before submitting, so this is a defense-in-
-  depth path, not a normal one — but it hasn't been polished.
+- **`GET /missions/` doesn't implement the date-range filter spec §11 promises.** The spec lists the
+  filters as "status, date range, search"; only `status` and `search` exist on the selector
+  (`mission_control/missions/selectors/missions.py`), and even `search` has no UI control feeding it —
+  it's reachable only by calling the API directly. Adding a date-range filter plus its UI is beyond this
+  plan's scope, consistent with the pagination limitation above: disclosed here rather than implemented.
 
-Neither of the first two is hidden from the codebase: `staffing_readiness()`'s docstring measures its own
-query count and the frontend list hooks are consistent (not accidental) across every list screen.
+None of the above is hidden from the codebase: `staffing_readiness()`'s docstring measures its own query
+count and the frontend list hooks are consistent (not accidental) across every list screen.

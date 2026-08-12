@@ -6,7 +6,7 @@ services:
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U mission"], interval: 2s, retries: 20}
   backend:
     build: ./backend
-    command: sh -c "uv run python manage.py migrate && uv run python manage.py seed_demo && uv run gunicorn config.wsgi --bind 0.0.0.0:8000"
+    command: sh -c ".venv/bin/python manage.py migrate && .venv/bin/python manage.py seed_demo && .venv/bin/gunicorn config.wsgi --bind 0.0.0.0:8000"
     environment:
       DATABASE_URL: postgres://mission:mission@db:5432/mission_control
       DEBUG: "false"
@@ -14,9 +14,15 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
     depends_on:
       db: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; socket.create_connection(('localhost', 8000), 2).close()"]
+      interval: 2s
+      retries: 30
+      start_period: 30s
   web:
     build: ./frontend
     ports: ["80:80"]
-    depends_on: [backend]
+    depends_on:
+      backend: {condition: service_healthy}
 volumes:
   pgdata:
