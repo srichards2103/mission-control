@@ -584,3 +584,46 @@ def test_identical_data_yields_identical_results_across_runs(mission):
     _big_scenario(mission, 12)
     runs = [dataclasses.asdict(match_mission(mission)) for _ in range(3)]
     assert runs[0] == runs[1] == runs[2]
+
+
+# ---------------------------------------------------- matcher and propose agree on seats (I3)
+
+
+def test_open_capacity_and_the_propose_guard_agree_about_deactivated_members(mission):
+    """The `max_crew` invariant was expressed twice and drifted: the matcher filtered
+    live assignments on `user__is_active=True` (per the ruling that deactivated crew do
+    not fill seats), `assignments_propose`'s guard did not. With one deactivated live
+    member the matcher reported a free seat and proposed a candidate, and the propose
+    click was then rejected with "This would exceed max_crew" -- an unactionable
+    suggestion, and an error naming the wrong cause. Both now read `live_seat_count`.
+    """
+    from mission_control.missions.selectors.staffing import live_seat_count
+    from mission_control.missions.services.assignments import assignments_propose
+
+    mission.max_crew = 3
+    mission.save(update_fields=["max_crew"])
+    skill = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=1, required_count=3)
+
+    quit_crew = crew_with(mission, {skill: 5}, name="Departed")
+    AssignmentFactory(mission=mission, user=quit_crew, status=AssignmentStatus.PROPOSED)
+    quit_crew.is_active = False
+    quit_crew.save(update_fields=["is_active"])
+
+    candidates = [crew_with(mission, {skill: 5}, name=f"Candidate {i}") for i in range(3)]
+    lead = mission.created_by
+
+    # The deactivated member holds no seat, so all three are free.
+    assert live_seat_count(mission) == 0
+
+    result = match_mission(mission)
+    assert len(result.team) == 3, "the matcher should fill all three free seats"
+    assert result.open_capacity == 0  # consumed by the team it just proposed
+
+    # And the matcher's suggestion is actionable: proposing exactly the team it returned
+    # is accepted rather than bounced by the propose guard's own max_crew count.
+    proposed = assignments_propose(
+        actor=lead, mission=mission, user_ids=[m.user_id for m in result.team]
+    )
+    assert {a.user_id for a in proposed} == {c.id for c in candidates}
+    assert live_seat_count(mission) == 3

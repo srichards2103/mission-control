@@ -211,3 +211,21 @@ def test_mission_detail_permission_denied_stays_403(auth_client_for):
     mission = MissionFactory(tenant=crew.tenant)
     resp = auth_client_for(crew).get(f"/api/v1/missions/{mission.id}/")
     assert resp.status_code == 403
+
+
+def test_transitions_endpoint_is_not_an_existence_oracle(auth_client_for):
+    """I6: the transitions endpoint delegated ALL permission logic to
+    `transition_mission`, which is right for the per-action permission but meant the
+    fetch ran first -- so a crew member got 404 for a nonexistent mission id and 403 for
+    a real one, an intra-tenant existence oracle. A MISSION_VIEW check before the fetch
+    makes both answers identical; every role that can legally transition holds it.
+    """
+    lead = UserFactory(role=Role.MISSION_LEAD)
+    crew = UserFactory(role=Role.CREW_MEMBER, tenant=lead.tenant)
+    real = MissionFactory(tenant=lead.tenant, created_by=lead)
+    client = auth_client_for(crew)
+
+    real_resp = client.post(f"/api/v1/missions/{real.id}/transitions/", {"action": "submit"})
+    missing_resp = client.post("/api/v1/missions/99999999/transitions/", {"action": "submit"})
+    assert real_resp.status_code == missing_resp.status_code == 403
+    assert real_resp.data == missing_resp.data

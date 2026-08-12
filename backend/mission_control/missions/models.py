@@ -15,6 +15,11 @@ class MissionStatus(models.TextChoices):
     CANCELLED = "cancelled"
 
 
+# The two states nothing can leave (spec §8). A property of the lifecycle itself, so it
+# lives with the status enum rather than inside whichever service first needed it.
+TERMINAL_MISSION_STATUSES = frozenset({MissionStatus.COMPLETED, MissionStatus.CANCELLED})
+
+
 class Mission(TenantModel):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)

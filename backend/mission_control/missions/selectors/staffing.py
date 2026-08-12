@@ -14,7 +14,7 @@ Two deliberate narrowings of the prose, both settled and not bugs:
   though spec §9's wording says "proposed anywhere" — §9's own enumeration of soft
   conflicts is a closed list of draft/pending/rejected. A finished or abandoned mission
   cannot compete for anyone's time.
-* Seat filling ignores deactivated members (see `_accepted_assignments_qs`); the
+* Seat filling ignores deactivated members (see `accepted_assignments`); the
   hard-block predicate itself does not, because the global availability rule is stated
   purely in terms of assignment status, mission status and dates.
 """
@@ -153,7 +153,31 @@ def soft_conflicts_for_users(
     return dict(result)
 
 
-def _accepted_assignments_qs(mission: Mission) -> QuerySet[Assignment]:
+def live_assignments(mission: Mission) -> QuerySet[Assignment]:
+    """The assignments that occupy one of `mission`'s `max_crew` seats.
+
+    Live (proposed or accepted, per `LIVE_ASSIGNMENT_STATUSES`) and held by someone who
+    can still serve -- same `user__is_active=True` narrowing as `accepted_assignments`
+    below, per the ruling that deactivated crew stop filling seats.
+
+    This exists because the invariant was written twice and drifted: the matcher
+    filtered on `is_active`, `assignments_propose`'s `max_crew` check did not. With
+    `max_crew=3` and one deactivated live member, the matcher reported one free seat and
+    proposed a candidate, and the propose click then failed with "This would exceed
+    max_crew (3)" -- an unactionable suggestion, and an error naming the wrong cause.
+    Both now read this.
+    """
+    return Assignment.objects.filter(
+        mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES, user__is_active=True
+    )
+
+
+def live_seat_count(mission: Mission) -> int:
+    """How many of `mission`'s `max_crew` seats are currently taken."""
+    return live_assignments(mission).count()
+
+
+def accepted_assignments(mission: Mission) -> QuerySet[Assignment]:
     """The accepted assignments that actually staff `mission`.
 
     Deactivated members do not staff anything: `user_update` can flip `is_active` long
@@ -206,7 +230,7 @@ def mission_coverage(mission: Mission) -> CoverageReport:
             "skill__name", "-min_proficiency", "id"
         )
     )
-    accepted = list(_accepted_assignments_qs(mission).select_related("user"))
+    accepted = list(accepted_assignments(mission).select_related("user"))
     accepted_users = {a.user_id: a.user for a in accepted}
 
     # One pass over the accepted crew's proficiencies in the required skills, grouped
@@ -279,7 +303,7 @@ def mission_conflict_errors(mission: Mission) -> list[str]:
             end_date=mission.end_date,
             exclude_mission_id=mission.id,
         )
-        .filter(user_id__in=_accepted_assignments_qs(mission).values("user_id"))
+        .filter(user_id__in=accepted_assignments(mission).values("user_id"))
         .select_related("mission", "user")
         .order_by("user__name", "user_id", "mission__start_date", "mission_id")
     )
@@ -298,11 +322,13 @@ def staffing_validation_errors(mission: Mission) -> list[str]:
 
     Full validation: coverage, crew bounds, and conflicts. Used by the approve guard.
     The activate guard's belt-and-braces re-check calls `mission_conflict_errors`
-    directly instead, since coverage/crew-bounds cannot regress between approval and
-    activation without going through `assignment_remove`, which is a lead/director
-    action independent of the FSM -- re-proving it at activate would wrongly block an
-    already-approved mission over crew changes the activate guard was never meant to
-    police (only fresh conflicts from other missions being approved in the interim).
+    directly instead. Coverage and crew bounds CAN regress between approval and
+    activation -- via `assignment_remove`, or via a member being deactivated and so
+    dropping out of `accepted_assignments` -- but both are lead/director actions
+    independent of this FSM, and re-proving them at activate would wrongly block an
+    already-approved mission over exactly those changes. What the re-check exists for is
+    the one thing nothing else catches: a different mission approved in the interim,
+    hard-blocking this mission's crew. See `_validate_conflicts_for_activation`.
     """
     report = mission_coverage(mission)
     errors = [

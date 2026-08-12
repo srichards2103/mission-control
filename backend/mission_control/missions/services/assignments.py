@@ -13,24 +13,25 @@ from mission_control.common.db import integrity_error_as
 from mission_control.common.exceptions import ApplicationError
 from mission_control.missions.models import (
     LIVE_ASSIGNMENT_STATUSES,
+    TERMINAL_MISSION_STATUSES,
     Assignment,
     AssignmentStatus,
     Mission,
-    MissionStatus,
 )
-from mission_control.missions.selectors.staffing import hard_blocked_user_ids
+from mission_control.missions.selectors.staffing import (
+    hard_blocked_user_ids,
+    live_seat_count,
+)
 from mission_control.missions.services.missions import _ensure_owns_or_director
 from mission_control.tenants.context import require_current_tenant_id
 from mission_control.users.models import User
 from mission_control.users.roles import Role
 
-TERMINAL = frozenset({MissionStatus.COMPLETED, MissionStatus.CANCELLED})
-
 
 @transaction.atomic
 def assignments_propose(*, actor, mission: Mission, user_ids: list[int]) -> list[Assignment]:
     _ensure_owns_or_director(actor, mission)
-    if mission.status in TERMINAL:
+    if mission.status in TERMINAL_MISSION_STATUSES:
         raise ApplicationError("Cannot assign crew to a completed or cancelled mission.")
 
     unique_ids = set(user_ids)
@@ -71,10 +72,11 @@ def assignments_propose(*, actor, mission: Mission, user_ids: list[int]) -> list
             f"Unavailable for these dates: {names}.", extra={"user_ids": sorted(blocked)}
         )
 
-    live_count = Assignment.objects.filter(
-        mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES
-    ).count()
-    if live_count + len(users) > mission.max_crew:
+    # Via the shared selector, so this and the matcher's `open_capacity` are the same
+    # question asked once. Note this is NOT the `already` check above: that one asks
+    # whether a live row exists at all (the partial unique index enforces it regardless
+    # of `is_active`), while this one counts seats, which deactivated crew do not hold.
+    if live_seat_count(mission) + len(users) > mission.max_crew:
         raise ApplicationError(f"This would exceed max_crew ({mission.max_crew}).")
 
     created = []
@@ -109,7 +111,7 @@ def assignment_respond(
 ) -> Assignment:
     if assignment.user_id != actor.id:
         raise PermissionDenied("You can only respond to your own assignments.")
-    if assignment.mission.status in TERMINAL:
+    if assignment.mission.status in TERMINAL_MISSION_STATUSES:
         raise ApplicationError("This mission is no longer active.")
     if assignment.status != AssignmentStatus.PROPOSED:
         raise ApplicationError("This assignment has already been responded to.")

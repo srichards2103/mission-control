@@ -26,10 +26,12 @@ tree, which is what Task 5.2's endpoint serialises.
 import datetime as dt
 from dataclasses import dataclass, field
 
-from mission_control.missions.models import LIVE_ASSIGNMENT_STATUSES, Assignment, Mission
+from mission_control.common.exceptions import ApplicationError
+from mission_control.missions.models import TERMINAL_MISSION_STATUSES, Mission
 from mission_control.missions.selectors.staffing import (
     committed_assignments,
     hard_blocked_user_ids,
+    live_assignments,
     mission_coverage,
     soft_conflicts_for_users,
 )
@@ -163,18 +165,15 @@ def match_mission(mission: Mission) -> MatchResult:
     # 2. The pool: active crew of this tenant, minus anyone hard-blocked elsewhere,
     #    minus anyone already proposed or accepted here (they are not a new proposal).
     #
-    #    `user__is_active=True` mirrors `staffing._accepted_assignments_qs`, per the
-    #    human ruling that deactivated crew do not fill staffing seats. Without it a
-    #    member deactivated after being proposed would still consume a `max_crew` seat
-    #    and count toward `min_crew`, so the matcher would under-propose and hand back a
-    #    team the approve guard then rejects as short — with nothing explaining why.
-    #    Such a member is already absent from `roster` below, so freeing their seat here
-    #    cannot re-propose them; it only stops them holding a seat nobody can use.
-    live_user_ids = set(
-        Assignment.objects.filter(
-            mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES, user__is_active=True
-        ).values_list("user_id", flat=True)
-    )
+    #    Seat occupancy comes from `staffing.live_assignments` — the same selector
+    #    `assignments_propose` counts against `max_crew` — so the matcher's
+    #    `open_capacity` and the propose guard can no longer disagree about whether a
+    #    deactivated member still holds a seat. They did disagree: the matcher reported
+    #    a free seat and proposed a candidate, and the propose click then failed with
+    #    "This would exceed max_crew", naming the wrong cause. Such a member is already
+    #    absent from `roster` below, so freeing their seat cannot re-propose them; it
+    #    only stops them holding a seat nobody can use.
+    live_user_ids = set(live_assignments(mission).values_list("user_id", flat=True))
     capacity = max(mission.max_crew - len(live_user_ids), 0)
 
     blocked_ids = hard_blocked_user_ids(
@@ -374,3 +373,20 @@ def match_mission(mission: Mission) -> MatchResult:
         alternatives=alternatives,
         open_capacity=capacity,
     )
+
+
+def mission_match(*, actor, mission: Mission) -> MatchResult:
+    """`match_mission` behind the one domain rule the endpoint has to enforce.
+
+    `match_mission` itself is pure and takes no actor -- that signature is fixed by the
+    matching-engine contract and by every test that calls it directly. The "you cannot
+    match a finished or abandoned mission" rule is not part of the engine, but it is
+    still a business rule, so it belongs here rather than in the view: the API layer's
+    job is permission -> selector -> service -> serialise, and `apis/matching.py` was
+    the only endpoint adjudicating FSM legality itself (reaching into
+    `services.assignments.TERMINAL` to do it, while propose and respond kept the same
+    rule in their own service).
+    """
+    if mission.status in TERMINAL_MISSION_STATUSES:
+        raise ApplicationError("Cannot match a completed or cancelled mission.")
+    return match_mission(mission)

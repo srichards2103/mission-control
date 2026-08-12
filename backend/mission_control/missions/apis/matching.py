@@ -1,16 +1,16 @@
 """Match API: expose Task 5.1's auto-matching engine over HTTP.
 
-Read-only -- `match_mission` makes no assignments (see its docstring: it is pure), so
-this endpoint calls it directly and serialises the result. No service, no write.
+Read-only -- the engine makes no assignments (see `match_mission`'s docstring: it is
+pure). The endpoint still goes through `services.matching.mission_match`, because the
+one rule guarding it ("not on a completed or cancelled mission") is a business rule,
+and business rules are not decided in the API layer.
 """
 
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from mission_control.common.exceptions import ApplicationError
 from mission_control.missions.selectors import missions as mission_selectors
-from mission_control.missions.services.assignments import TERMINAL
-from mission_control.missions.services.matching import MatchResult, match_mission
+from mission_control.missions.services.matching import MatchResult, mission_match
 from mission_control.users.permissions import Permission, ensure_permission
 
 
@@ -65,6 +65,5 @@ class MissionMatchApi(APIView):
     def post(self, request, mission_id: int):
         ensure_permission(request.user, Permission.MATCH_RUN)
         mission = mission_selectors.mission_get(mission_id)
-        if mission.status in TERMINAL:
-            raise ApplicationError("Cannot match a completed or cancelled mission.")
-        return Response(match_payload(match_mission(mission)))
+        result = mission_match(actor=request.user, mission=mission)
+        return Response(match_payload(result))

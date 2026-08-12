@@ -75,7 +75,7 @@ def _lock_accepted_crew(mission: Mission) -> None:
     second one to run sees the first one's committed state (e.g. a hard-block conflict
     it just created) rather than a stale read from before it started.
 
-    Sourced from `_accepted_assignments_qs` -- the Task 4.2 selectors' one definition of
+    Sourced from `accepted_assignments` -- the Task 4.2 selectors' one definition of
     "this mission's accepted crew" (accepted assignment + `user__is_active=True`) --
     rather than re-deriving it here, so this can never quietly diverge from what
     `mission_coverage`/`staffing_validation_errors` count. `User` does not inherit
@@ -90,12 +90,10 @@ def _lock_accepted_crew(mission: Mission) -> None:
     so it would surface as an unhandled 500. `LockRows` sits above `Sort` in the query
     plan, so ordering the queryset here is sufficient to fix the lock order.
     """
-    from mission_control.missions.selectors.staffing import _accepted_assignments_qs
+    from mission_control.missions.selectors.staffing import accepted_assignments
     from mission_control.users.models import User
 
-    accepted_user_ids = list(
-        _accepted_assignments_qs(mission).values_list("user_id", flat=True)
-    )
+    accepted_user_ids = list(accepted_assignments(mission).values_list("user_id", flat=True))
     list(
         User.objects.select_for_update()
         .filter(id__in=accepted_user_ids, tenant_id=mission.tenant_id)
@@ -125,7 +123,7 @@ def _validate_conflicts_for_activation(mission: Mission) -> None:
     proven at approve time CAN regress before activation -- via `assignment_remove` (a
     lead/director action, independent of this FSM) flipping an accepted assignment to
     `removed`, or via a crew member being deactivated, which drops them out of
-    `_accepted_assignments_qs` per the Task 4.2 ruling that deactivated crew stop
+    `accepted_assignments` per the Task 4.2 ruling that deactivated crew stop
     filling seats -- and re-running the full validation here would block activation of
     an already-approved mission over exactly that kind of change, which the plan does
     not intend. What CAN'T be caught any other way, and so is the one thing this

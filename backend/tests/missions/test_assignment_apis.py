@@ -475,3 +475,17 @@ def test_crew_utilization_never_exceeds_100_percent(auth_client_for):
     assert data["crew"], "expected the crew roster to be non-empty"
     assert all(row["utilization_pct"] <= 100 for row in data["crew"]), data["crew"]
     assert data["org_utilization_pct"] <= 100
+
+
+def test_cross_tenant_bulk_propose_404(auth_client_for):
+    """The one object-scoped write that had no cross-tenant test: another tenant's
+    mission must be a 404 from the scoped manager, never a 403.
+    """
+    lead = UserFactory(role=Role.MISSION_LEAD)
+    other_mission = MissionFactory()  # different tenant
+    crew = UserFactory(role=Role.CREW_MEMBER, tenant=lead.tenant)
+    resp = auth_client_for(lead).post(
+        f"/api/v1/missions/{other_mission.id}/assignments/", {"user_ids": [crew.id]},
+        format="json",
+    )
+    assert resp.status_code == 404

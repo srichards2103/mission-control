@@ -135,8 +135,14 @@ class MissionTransitionApi(APIView):
         reason = serializers.CharField(required=False, allow_blank=True)
 
     def post(self, request, mission_id: int):
-        # No static permission check here: the FSM table (transition_mission) owns the
-        # permission, ownership, and state-validity checks per action.
+        # MISSION_VIEW first, before the fetch: `transition_mission` owns the *per-action*
+        # permission (mission.progress vs mission.review), which is why there is no
+        # action-specific check here -- but without a check of any kind this was the one
+        # endpoint of eleven where a crew member could tell a real mission id from a
+        # nonexistent one, getting 404 for one and 403 for the other. Every role that can
+        # legally transition anything already holds MISSION_VIEW, so nothing legitimate
+        # changes.
+        ensure_permission(request.user, Permission.MISSION_VIEW)
         mission = selectors.mission_get(mission_id)
         serializer = self.InputSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
