@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCreateSkill, useSkills, useUpdateSkill } from "@/features/skills/api/skills";
-import { errorMessage } from "@/lib/api-errors";
+import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
 
 export function SkillsTab() {
   const { data: skills, isLoading, isError } = useSkills();
@@ -13,14 +13,17 @@ export function SkillsTab() {
   const updateSkill = useUpdateSkill();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
   async function handleAdd() {
     if (!name.trim()) return;
+    setFieldErrors({});
     try {
       await createSkill.mutateAsync({ name, description });
       setName("");
       setDescription("");
     } catch (err) {
+      setFieldErrors(fieldErrorsFrom(err));
       toast.error(errorMessage(err));
     }
   }
@@ -67,6 +70,12 @@ export function SkillsTab() {
         <TableRow>
           <TableCell>
             <Input placeholder="New skill name" value={name} onChange={(e) => setName(e.target.value)} />
+            {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name.join(" ")}</p>}
+            {fieldErrors.non_field_errors && (
+              <p role="alert" className="text-sm text-destructive">
+                {fieldErrors.non_field_errors.join(" ")}
+              </p>
+            )}
           </TableCell>
           <TableCell>
             <Input
@@ -74,6 +83,9 @@ export function SkillsTab() {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+            {fieldErrors.description && (
+              <p className="text-sm text-destructive">{fieldErrors.description.join(" ")}</p>
+            )}
           </TableCell>
           <TableCell />
           <TableCell>

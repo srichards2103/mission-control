@@ -59,6 +59,54 @@ describe("settings", () => {
     expect(await screen.findByText(/^validation error$/i)).toBeInTheDocument();
   });
 
+  // F4: the skills and organisation tabs used to only toast errorMessage(err) on a
+  // failed mutation, unlike AddUserDialog in the same folder, which also renders
+  // fieldErrorsFrom() inline. Payload shape below is exactly what the live backend
+  // returns for a duplicate skill name post the backend fix wave's
+  // violation_error_message additions ("Constraint ... is violated" is gone).
+  it("shows the duplicate-skill-name error inline on the skills tab, not just a bare toast", async () => {
+    server.use(http.get("/api/v1/auth/me/", () => HttpResponse.json(directorUser)));
+    server.use(
+      http.post("/api/v1/skills/", () =>
+        HttpResponse.json(
+          { message: "Validation error", extra: { fields: { __all__: ["A skill with this name already exists."] } } },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderAt("/settings");
+
+    await userEvent.click(await screen.findByRole("tab", { name: /skills/i }));
+    await userEvent.type(screen.getByPlaceholderText(/new skill name/i), "EVA Ops");
+    await userEvent.click(screen.getByRole("button", { name: /add skill/i }));
+
+    // Inline, next to the form -- not just a toast that vanishes.
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((el) => /a skill with this name already exists/i.test(el.textContent ?? ""))).toBe(
+      true,
+    );
+  });
+
+  it("shows a field-level validation error inline on the organisation tab", async () => {
+    server.use(http.get("/api/v1/auth/me/", () => HttpResponse.json(directorUser)));
+    server.use(
+      http.patch("/api/v1/settings/organisation/", () =>
+        HttpResponse.json(
+          { message: "Validation error", extra: { fields: { name: ["This field may not be blank."] } } },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderAt("/settings");
+
+    const main = await screen.findByRole("main");
+    await userEvent.click(await within(main).findByRole("tab", { name: /organisation/i }));
+    await userEvent.click(within(main).getByRole("button", { name: /edit organisation name/i }));
+    await userEvent.click(within(main).getByRole("button", { name: /^save$/i }));
+
+    expect(await within(main).findByText(/this field may not be blank/i)).toBeInTheDocument();
+  });
+
   it("shows the server's business-rule message when a director deactivates themselves", async () => {
     server.use(http.get("/api/v1/auth/me/", () => HttpResponse.json(directorUser)));
     server.use(
