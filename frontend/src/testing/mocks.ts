@@ -30,8 +30,18 @@ function initialSkills() {
 }
 let skills = initialSkills();
 
+// Mutable "my skills" profile rows for the logged-in crew member, mutated in place
+// by the PUT /api/v1/me/skills/ handler below (replace-the-whole-collection
+// semantics — the same as the real API). Reseeded in resetMockData(), same reason
+// as `skills` above.
+function initialMySkills() {
+  return [{ skill_id: 1, skill_name: "Piloting", proficiency: 8 }];
+}
+let mySkills = initialMySkills();
+
 export function resetMockData() {
   skills = initialSkills();
+  mySkills = initialMySkills();
 }
 
 export const server = setupServer(
@@ -49,4 +59,41 @@ export const server = setupServer(
     HttpResponse.json({ results: [directorUser], count: 1, limit: 25, offset: 0 })),
   http.get("/api/v1/settings/organisation/", () =>
     HttpResponse.json({ id: 1, name: "Helios", slug: "helios" })),
+  // NOTE: the task brief's sample shows {"items": [...]} for /api/v1/me/skills/, but
+  // the real backend returns the standard paginated envelope (see
+  // backend/tests/users/test_profile_api.py) per the plan-wide ruling that every list
+  // endpoint uses {"results", "count", "limit", "offset"} with no exceptions. Mocked
+  // here to match the live contract, not the brief's sample.
+  http.get("/api/v1/me/skills/", () =>
+    HttpResponse.json({ results: mySkills, count: mySkills.length, limit: 25, offset: 0 })),
+  http.put("/api/v1/me/skills/", async ({ request }) => {
+    const body = (await request.json()) as { items: { skill_id: number; proficiency: number }[] };
+    mySkills = body.items.map((item) => ({
+      skill_id: item.skill_id,
+      skill_name: skills.find((s) => s.id === item.skill_id)?.name ?? `Skill ${item.skill_id}`,
+      proficiency: item.proficiency,
+    }));
+    return HttpResponse.json({ results: mySkills, count: mySkills.length, limit: 25, offset: 0 });
+  }),
+  http.get("/api/v1/crew/", () =>
+    HttpResponse.json({
+      results: [
+        {
+          id: 2,
+          name: "Crew Member",
+          email: "crew@helios.test",
+          skills: [{ skill_id: 1, name: "Piloting", proficiency: 8 }],
+        },
+      ],
+      count: 1,
+      limit: 25,
+      offset: 0,
+    })),
+  http.get("/api/v1/crew/:id/", ({ params }) =>
+    HttpResponse.json({
+      id: Number(params.id),
+      name: "Crew Member",
+      email: "crew@helios.test",
+      skills: [{ skill_id: 1, name: "Piloting", proficiency: 8 }],
+    })),
 );

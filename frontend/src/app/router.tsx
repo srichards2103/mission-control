@@ -3,6 +3,9 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { ProtectedRoute, RequirePermission, hasPermission, useUser } from "@/lib/auth";
 import { LoginForm } from "@/features/auth/components/login-form";
 import { SettingsPage } from "@/features/settings/components/settings-page";
+import { ProfilePage } from "@/features/profile/components/profile-page";
+import { CrewListPage } from "@/features/crew/components/crew-list-page";
+import { CrewDetailPage } from "@/features/crew/components/crew-detail-page";
 
 function HomeRedirect() {
   const { data: user } = useUser();
@@ -20,9 +23,31 @@ const routes = [
       children: [
         { path: "/", element: <HomeRedirect /> },
         { path: "/missions", element: <h1>Missions</h1> },          // Stage 3
-        { path: "/crew", element: <h1>Crew</h1> },                  // Stage 2
+        {
+          path: "/crew",
+          element: (
+            <RequirePermission permission="crew.view">
+              <CrewListPage />
+            </RequirePermission>
+          ),
+        },
+        {
+          path: "/crew/:crewId",
+          element: (
+            <RequirePermission permission="crew.view">
+              <CrewDetailPage />
+            </RequirePermission>
+          ),
+        },
         { path: "/my-assignments", element: <h1>My Assignments</h1> }, // Stage 4
-        { path: "/my-profile", element: <h1>My Profile</h1> },      // Stage 2
+        {
+          path: "/my-profile",
+          element: (
+            <RequirePermission permission="own_skills.edit">
+              <ProfilePage />
+            </RequirePermission>
+          ),
+        },
         {
           path: "/settings",
           element: (
