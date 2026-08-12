@@ -35,7 +35,7 @@ def crew_skills_set(*, actor, items: list[dict]) -> None:
     if missing:
         raise ApplicationError("Unknown or archived skills.", extra={"skill_ids": sorted(missing)})
     CrewSkill.objects.filter(user=actor).delete()
-    CrewSkill.objects_unscoped.bulk_create([
+    CrewSkill.objects.bulk_create([
         CrewSkill(tenant_id=require_current_tenant_id(), user=actor,
                   skill_id=item["skill_id"], proficiency=item["proficiency"])
         for item in items

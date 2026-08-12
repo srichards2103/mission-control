@@ -95,3 +95,17 @@ def test_put_replaces_only_actors_own_rows_not_other_users(auth_client_for):
     assert resp.status_code == 200
     other_row.refresh_from_db()
     assert other_row.proficiency == 5
+
+
+def test_put_empty_items_wipes_profile(auth_client_for):
+    crew = UserFactory(role=Role.CREW_MEMBER)
+    CrewSkillFactory(user=crew)
+    resp = auth_client_for(crew).put("/api/v1/me/skills/", {"items": []}, format="json")
+    assert resp.status_code == 200
+    assert not CrewSkill.objects_unscoped.filter(user=crew).exists()
+
+
+def test_directors_cannot_view_profile(auth_client_for):
+    director = UserFactory(role=Role.DIRECTOR)
+    resp = auth_client_for(director).get("/api/v1/me/skills/")
+    assert resp.status_code == 403
