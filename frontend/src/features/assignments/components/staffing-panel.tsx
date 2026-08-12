@@ -5,20 +5,37 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useRemoveAssignment, useStaffing } from "@/features/assignments/api/assignments";
 import { AddCrewDialog } from "@/features/assignments/components/add-crew-dialog";
+import { MatchDialog } from "@/features/matching/components/match-dialog";
+import { useMission, type MissionStatus } from "@/features/missions/api/missions";
 import { errorMessage } from "@/lib/api-errors";
 import { hasPermission, useUser } from "@/lib/auth";
+
+// Mirrors transition-buttons.tsx's TERMINAL_STATUSES -- duplicated rather than
+// imported because that constant isn't exported, and this is the only other place
+// that needs "is this mission over" as a plain gate (not the FSM's full transition
+// table). Auto-matching a completed/cancelled mission is refused server-side with a
+// 400 ("Cannot match a completed or cancelled mission."), so this only avoids
+// showing a button that would always fail.
+const TERMINAL_STATUSES: MissionStatus[] = ["completed", "cancelled"];
 
 export function StaffingPanel({ missionId }: { missionId: number }) {
   const { data: user } = useUser();
   const { data: staffing, isLoading, isError } = useStaffing(missionId);
+  // Same query key as the mission-detail page's own useMission(id) -- by the time
+  // this panel mounts the page has already loaded it, so this is a cache hit, not a
+  // second network round trip. Needed here only to gate the Auto-match button on
+  // "mission isn't terminal" without threading mission status through as a prop.
+  const { data: mission } = useMission(missionId);
   const removeAssignment = useRemoveAssignment(missionId);
   const [addCrewOpen, setAddCrewOpen] = useState(false);
+  const [matchOpen, setMatchOpen] = useState(false);
   // Tracks which single roster row is mid-removal, so an in-flight removal only
   // disables that row's own Remove button rather than every row's (removeAssignment
   // is one shared mutation object for the whole panel; isPending alone can't tell
   // rows apart).
   const [removingId, setRemovingId] = useState<number | null>(null);
   const canManage = hasPermission(user, "assignment.manage");
+  const canMatch = hasPermission(user, "match.run") && !!mission && !TERMINAL_STATUSES.includes(mission.status);
 
   // isLoading -> isError -> data, in that order (see mission-detail-page.tsx and
   // others): data?.map must never run before both checks.
@@ -80,11 +97,18 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">Roster</h3>
-          {canManage && (
-            <Button size="sm" onClick={() => setAddCrewOpen(true)}>
-              Add crew
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {canMatch && (
+              <Button size="sm" variant="outline" onClick={() => setMatchOpen(true)}>
+                Auto-match
+              </Button>
+            )}
+            {canManage && (
+              <Button size="sm" onClick={() => setAddCrewOpen(true)}>
+                Add crew
+              </Button>
+            )}
+          </div>
         </div>
         {staffing.roster.length === 0 ? (
           <p className="text-sm text-muted-foreground">No crew proposed yet.</p>
@@ -143,6 +167,7 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
           currentRosterUserIds={staffing.roster.map((r) => r.user_id)}
         />
       )}
+      {canMatch && <MatchDialog missionId={missionId} open={matchOpen} onOpenChange={setMatchOpen} />}
     </div>
   );
 }

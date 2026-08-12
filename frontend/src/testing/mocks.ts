@@ -372,6 +372,22 @@ export const server = setupServer(
     if (!found) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
     return HttpResponse.json(found);
   }),
+  // Default match response: an empty proposal with no unfilled seats and full
+  // remaining capacity. Individual matcher tests override this via server.use() to
+  // exercise a real team/unfilled-seats/alternatives payload -- this base handler only
+  // exists so `onUnhandledRequest: "error"` doesn't fail every *other* test that now
+  // renders the (permission-gated) Auto-match button but never clicks it.
+  http.post("/api/v1/missions/:id/match/", ({ params }) => {
+    const mission = missions.find((m) => m.id === Number(params.id));
+    if (!mission) return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+    if (mission.status === "completed" || mission.status === "cancelled") {
+      return HttpResponse.json(
+        { message: "Cannot match a completed or cancelled mission.", extra: {} },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json({ team: [], unfilled_seats: [], alternatives: [], open_capacity: mission.max_crew });
+  }),
   http.post("/api/v1/missions/:id/assignments/", async ({ params, request }) => {
     const missionId = Number(params.id);
     const found = staffing[missionId];
