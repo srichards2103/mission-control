@@ -39,6 +39,20 @@ function initialMySkills() {
 }
 let mySkills = initialMySkills();
 
+export const missionFixture = {
+  id: 10,
+  name: "Ganymede Survey",
+  status: "draft",
+  description: "Survey the icy moon for viable ice-mining sites.",
+  start_date: "2026-09-01",
+  end_date: "2026-09-30",
+  min_crew: 3,
+  max_crew: 6,
+  created_by: { id: 1, name: "Lead" },
+  requirements: [{ id: 1, skill_id: 1, skill_name: "Piloting", min_proficiency: 5, required_count: 1 }],
+  history: [] as unknown[],
+};
+
 export function resetMockData() {
   skills = initialSkills();
   mySkills = initialMySkills();
@@ -96,4 +110,17 @@ export const server = setupServer(
       email: "crew@helios.test",
       skills: [{ skill_id: 1, name: "Piloting", proficiency: 8 }],
     })),
+  http.get("/api/v1/missions/", ({ request }) => {
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
+    const search = url.searchParams.get("search");
+    let results = [missionFixture];
+    if (status) results = results.filter((m) => m.status === status);
+    if (search) results = results.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+    return HttpResponse.json({ results, count: results.length, limit: 100, offset: 0 });
+  }),
+  http.get("/api/v1/missions/:id/", ({ params }) => {
+    if (Number(params.id) === missionFixture.id) return HttpResponse.json(missionFixture);
+    return HttpResponse.json({ message: "Not found.", extra: {} }, { status: 404 });
+  }),
 );
