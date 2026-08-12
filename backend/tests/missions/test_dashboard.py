@@ -370,6 +370,7 @@ def test_skill_gap_flagged(tenant):
     assert row == {
         "skill_id": scarce.id,
         "skill_name": "Xenobotany",
+        "min_proficiency": 7,
         "open_seats": 3,
         "qualified_crew": 1,
         "gap": True,
@@ -430,9 +431,165 @@ def test_skill_gaps_query_count_is_constant(tenant, django_assert_num_queries):
             CrewSkillFactory(user=crew, skill=skill, proficiency=5)
 
     make_skills_and_requirements(2)
-    with django_assert_num_queries(2):
+    with django_assert_num_queries(3):
         skill_gaps()
 
     make_skills_and_requirements(15)
-    with django_assert_num_queries(2):
+    with django_assert_num_queries(3):
         skill_gaps()
+
+
+# ------------------------------------------------------------------- skill_gaps corrections (I4)
+
+
+def test_skill_gaps_bands_by_threshold_instead_of_collapsing_to_the_minimum(tenant):
+    """The finding's exact shape: `[Pilot >=9 x1, Pilot >=2 x1]` with five crew at
+    proficiency 2. Collapsing the rows with `Min("min_proficiency")` compared all five
+    against a seat total of 2 and reported `gap=False`, hiding a real gap at >=9.
+    """
+    lead = UserFactory(role=Role.MISSION_LEAD, tenant=tenant)
+    mission = MissionFactory(
+        tenant=tenant, created_by=lead,
+        start_date=TODAY + dt.timedelta(days=5), end_date=TODAY + dt.timedelta(days=10),
+    )
+    pilot = SkillFactory(tenant=tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=pilot, min_proficiency=9, required_count=1)
+    MissionRequirementFactory(mission=mission, skill=pilot, min_proficiency=2, required_count=1)
+    for _ in range(5):
+        novice = UserFactory(role=Role.CREW_MEMBER, tenant=tenant)
+        CrewSkillFactory(user=novice, skill=pilot, proficiency=2)
+
+    rows = {g["min_proficiency"]: g for g in skill_gaps() if g["skill_id"] == pilot.id}
+    assert set(rows) == {9, 2}
+    assert rows[9] == {
+        "skill_id": pilot.id, "skill_name": "Piloting", "min_proficiency": 9,
+        "open_seats": 1, "qualified_crew": 0, "gap": True,
+    }
+    assert rows[2]["qualified_crew"] == 5
+    assert rows[2]["gap"] is False
+    # Gap rows sort first, so the hidden gap is now the first thing on screen.
+    assert skill_gaps()[0]["min_proficiency"] == 9
+
+
+def test_skill_gaps_open_seats_subtracts_filled_seats(tenant):
+    """`Sum("required_count")` never subtracted the seats already filled, so a
+    fully-crewed mission still contributed its whole seat count as "open".
+    """
+    lead = UserFactory(role=Role.MISSION_LEAD, tenant=tenant)
+    mission = MissionFactory(
+        tenant=tenant, created_by=lead, status=MissionStatus.APPROVED,
+        start_date=TODAY + dt.timedelta(days=5), end_date=TODAY + dt.timedelta(days=10),
+    )
+    skill = SkillFactory(tenant=tenant, name="Welding")
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=4, required_count=2)
+
+    filled = UserFactory(role=Role.CREW_MEMBER, tenant=tenant, name="On Board")
+    CrewSkillFactory(user=filled, skill=skill, proficiency=7)
+    AssignmentFactory(mission=mission, user=filled, status=AssignmentStatus.ACCEPTED)
+
+    row = next(g for g in skill_gaps() if g["skill_id"] == skill.id)
+    assert row["open_seats"] == 1
+
+    # A second acceptance covers the requirement outright: nothing is open any more.
+    second = UserFactory(role=Role.CREW_MEMBER, tenant=tenant, name="Also On Board")
+    CrewSkillFactory(user=second, skill=skill, proficiency=5)
+    AssignmentFactory(mission=mission, user=second, status=AssignmentStatus.ACCEPTED)
+
+    row = next(g for g in skill_gaps() if g["skill_id"] == skill.id)
+    assert row["open_seats"] == 0
+    assert row["gap"] is False
+
+
+def test_skill_gaps_only_accepted_active_crew_fill_seats(tenant):
+    """Same rule as `staffing.accepted_assignments`: a proposal is not a fill, and a
+    deactivated member stops filling the seat they had accepted.
+    """
+    lead = UserFactory(role=Role.MISSION_LEAD, tenant=tenant)
+    mission = MissionFactory(
+        tenant=tenant, created_by=lead, status=MissionStatus.APPROVED,
+        start_date=TODAY + dt.timedelta(days=5), end_date=TODAY + dt.timedelta(days=10),
+    )
+    skill = SkillFactory(tenant=tenant, name="Rigging")
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=4, required_count=2)
+
+    proposed = UserFactory(role=Role.CREW_MEMBER, tenant=tenant)
+    CrewSkillFactory(user=proposed, skill=skill, proficiency=7)
+    AssignmentFactory(mission=mission, user=proposed, status=AssignmentStatus.PROPOSED)
+
+    departed = UserFactory(role=Role.CREW_MEMBER, tenant=tenant, is_active=False)
+    CrewSkillFactory(user=departed, skill=skill, proficiency=7)
+    AssignmentFactory(mission=mission, user=departed, status=AssignmentStatus.ACCEPTED)
+
+    row = next(g for g in skill_gaps() if g["skill_id"] == skill.id)
+    assert row["open_seats"] == 2
+
+
+def test_skill_gaps_underqualified_accepted_crew_do_not_fill_the_demanding_row(tenant):
+    """A member accepted on the mission fills the row they qualify for, not the one they
+    don't -- the same greedy `mission_coverage` uses, via the shared `fill_skill_seats`.
+    """
+    lead = UserFactory(role=Role.MISSION_LEAD, tenant=tenant)
+    mission = MissionFactory(
+        tenant=tenant, created_by=lead, status=MissionStatus.APPROVED,
+        start_date=TODAY + dt.timedelta(days=5), end_date=TODAY + dt.timedelta(days=10),
+    )
+    skill = SkillFactory(tenant=tenant, name="Astrogation")
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=9, required_count=1)
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=3, required_count=1)
+
+    average = UserFactory(role=Role.CREW_MEMBER, tenant=tenant)
+    CrewSkillFactory(user=average, skill=skill, proficiency=4)
+    AssignmentFactory(mission=mission, user=average, status=AssignmentStatus.ACCEPTED)
+
+    rows = {g["min_proficiency"]: g for g in skill_gaps() if g["skill_id"] == skill.id}
+    assert rows[9]["open_seats"] == 1
+    assert rows[3]["open_seats"] == 0
+
+
+def test_skill_gaps_sums_the_same_band_across_missions(tenant):
+    lead = UserFactory(role=Role.MISSION_LEAD, tenant=tenant)
+    skill = SkillFactory(tenant=tenant, name="Hydroponics")
+    for _ in range(2):
+        mission = MissionFactory(
+            tenant=tenant, created_by=lead,
+            start_date=TODAY + dt.timedelta(days=5), end_date=TODAY + dt.timedelta(days=10),
+        )
+        MissionRequirementFactory(
+            mission=mission, skill=skill, min_proficiency=5, required_count=2
+        )
+    rows = [g for g in skill_gaps() if g["skill_id"] == skill.id]
+    assert len(rows) == 1
+    assert rows[0]["open_seats"] == 4
+
+
+def test_pending_approval_age_days_is_never_negative_under_an_offset_timezone():
+    """`age_days` subtracted a UTC-derived date (`submitted_at.date()`) from a
+    container-local one (`dt.date.today()`). Both sides are now the project timezone:
+    `timezone.localdate()` and `timezone.localtime(submitted_at).date()`.
+
+    This pins the invariant rather than reproducing the old defect, which only appears
+    when the container's timezone differs from TIME_ZONE -- something a test cannot
+    arrange from inside the process. Both far-flung timezones are checked so the
+    assertion cannot pass by both sides being wrong in the same direction.
+    """
+    from django.test import override_settings
+
+    for tz in ("Pacific/Kiritimati", "Pacific/Niue"):  # UTC+14 and UTC-11
+        with override_settings(TIME_ZONE=tz):
+            t = TenantFactory()
+            set_current_tenant_id(t.id)
+            lead = UserFactory(role=Role.MISSION_LEAD, tenant=t)
+            mission = MissionFactory(
+                tenant=t, created_by=lead, status=MissionStatus.PENDING_APPROVAL,
+                start_date=TODAY + dt.timedelta(days=10),
+                end_date=TODAY + dt.timedelta(days=20),
+            )
+            MissionTransition.objects_unscoped.create(
+                tenant=t, mission=mission, from_status="draft",
+                to_status="pending_approval", actor=lead, reason="",
+            )
+            row = next(
+                r for r in pipeline_summary()["pending_approvals"]
+                if r["mission_id"] == mission.id
+            )
+            assert row["age_days"] == 0, tz

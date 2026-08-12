@@ -56,7 +56,7 @@ def test_response_shape_with_data(auth_client_for):
         min_crew=2,
         max_crew=4,
     )
-    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=3, required_count=2)
+    MissionRequirementFactory(mission=mission, skill=skill, min_proficiency=3, required_count=3)
     crew = UserFactory(role=Role.CREW_MEMBER, tenant=director.tenant, name="Crew One")
     CrewSkillFactory(user=crew, skill=skill, proficiency=8)
     AssignmentFactory(
@@ -92,8 +92,12 @@ def test_response_shape_with_data(auth_client_for):
     gaps = resp.data["skill_gaps"]
     assert len(gaps) == 1
     gap_row = gaps[0]
-    assert set(gap_row.keys()) == {"skill_id", "skill_name", "open_seats", "qualified_crew", "gap"}
+    assert set(gap_row.keys()) == {
+        "skill_id", "skill_name", "min_proficiency", "open_seats", "qualified_crew", "gap",
+    }
     assert gap_row["skill_name"] == "Piloting"
+    # 3 required, 1 filled by the accepted crew member above -> 2 genuinely open.
+    assert gap_row["min_proficiency"] == 3
     assert gap_row["open_seats"] == 2
     assert gap_row["qualified_crew"] == 1
     assert gap_row["gap"] is True

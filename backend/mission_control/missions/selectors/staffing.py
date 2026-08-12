@@ -21,7 +21,7 @@ Two deliberate narrowings of the prose, both settled and not bugs:
 
 import datetime as dt
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 
 from django.db.models import QuerySet
@@ -196,6 +196,37 @@ def accepted_assignments(mission: Mission) -> QuerySet[Assignment]:
     )
 
 
+def fill_skill_seats(
+    rows: Sequence[tuple[int, int]], pool: Sequence[tuple[int, int]]
+) -> list[list[tuple[int, int]]]:
+    """Greedy seat fill for the requirement rows of a SINGLE skill.
+
+    `rows` is `(min_proficiency, required_count)` most-demanding-first; `pool` is
+    `(proficiency, user_id)` highest-first. Returns, per row, the pool entries that fill
+    it — each member is consumed at most once, which is spec §9's "a member may count
+    toward requirements of different skills at once, but fills at most one requirement
+    row per skill". Serving the most demanding row first is exact for this nested
+    structure (anyone qualified for a row also qualifies for every less demanding one),
+    so no search is needed.
+
+    Extracted so `mission_coverage` and `skill_gaps` fill seats by the same rule: the
+    dashboard used to compare every crew member clearing the *easiest* threshold against
+    a seat total that included the hardest, which hid real gaps outright.
+    """
+    result: list[list[tuple[int, int]]] = []
+    next_free = 0
+    for min_proficiency, required_count in rows:
+        taken: list[tuple[int, int]] = []
+        while len(taken) < required_count and next_free < len(pool):
+            proficiency, user_id = pool[next_free]
+            if proficiency < min_proficiency:
+                break  # pool is sorted desc, so nobody left qualifies for this row
+            next_free += 1
+            taken.append((proficiency, user_id))
+        result.append(taken)
+    return result
+
+
 @dataclass
 class RequirementCoverage:
     requirement_id: int
@@ -263,22 +294,19 @@ def mission_coverage(mission: Mission) -> CoverageReport:
 
     for skill_id, rows in by_skill.items():
         rows.sort(key=lambda c: (-c.min_proficiency, c.requirement_id))
-        pool = pool_by_skill.get(skill_id, [])
-        next_free = 0  # each member fills at most one row of this skill
-        for coverage in rows:
-            while coverage.filled_count < coverage.required_count and next_free < len(pool):
-                proficiency, user_id = pool[next_free]
-                if proficiency < coverage.min_proficiency:
-                    break  # pool is sorted desc, so nobody left qualifies for this row
-                next_free += 1
-                coverage.filled_count += 1
-                coverage.filled_by.append(
-                    {
-                        "user_id": user_id,
-                        "name": accepted_users[user_id].name,
-                        "proficiency": proficiency,
-                    }
-                )
+        fills = fill_skill_seats(
+            [(c.min_proficiency, c.required_count) for c in rows], pool_by_skill.get(skill_id, [])
+        )
+        for coverage, taken in zip(rows, fills, strict=True):
+            coverage.filled_count = len(taken)
+            coverage.filled_by = [
+                {
+                    "user_id": user_id,
+                    "name": accepted_users[user_id].name,
+                    "proficiency": proficiency,
+                }
+                for proficiency, user_id in taken
+            ]
 
     return CoverageReport(
         requirements=coverages,

@@ -84,6 +84,9 @@ class UtilizationSerializer(serializers.Serializer):
 class SkillGapSerializer(serializers.Serializer):
     skill_id = serializers.IntegerField()
     skill_name = serializers.CharField()
+    # One row per (skill, threshold): a skill required at two proficiencies produces two
+    # rows, because the crew who clear the easier one do not clear the harder one.
+    min_proficiency = serializers.IntegerField()
     open_seats = serializers.IntegerField()
     qualified_crew = serializers.IntegerField()
     gap = serializers.BooleanField()

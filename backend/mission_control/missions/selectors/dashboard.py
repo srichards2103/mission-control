@@ -23,16 +23,23 @@ Query-count discipline:
 import datetime as dt
 from collections import defaultdict
 
-from django.db.models import Count, F, Min, OuterRef, Subquery, Sum
+from django.db.models import Count, F, OuterRef, Subquery
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
 from mission_control.missions.models import (
+    Assignment,
+    AssignmentStatus,
     Mission,
     MissionRequirement,
     MissionStatus,
     MissionTransition,
 )
-from mission_control.missions.selectors.staffing import committed_assignments, mission_coverage
+from mission_control.missions.selectors.staffing import (
+    committed_assignments,
+    fill_skill_seats,
+    mission_coverage,
+)
 from mission_control.tenants.context import require_current_tenant_id
 from mission_control.users.models import CrewSkill, User
 from mission_control.users.roles import Role
@@ -67,7 +74,7 @@ def pipeline_summary() -> dict:
          per-mission lookup,
       3. one query for `upcoming`.
     """
-    today = dt.date.today()
+    today = timezone.localdate()
 
     counts = dict.fromkeys(MissionStatus.values, 0)
     for row in Mission.objects.values("status").annotate(n=Count("id")):
@@ -77,7 +84,10 @@ def pipeline_summary() -> dict:
         MissionTransition.objects.filter(
             mission=OuterRef("pk"), to_status=MissionStatus.PENDING_APPROVAL
         )
-        .order_by("-created_at")
+        # ("-created_at", "-id"), matching `selectors.missions.mission_submitter_id`:
+        # two transitions can share a timestamp, and "the latest submission" must not
+        # depend on which row the planner happens to return first.
+        .order_by("-created_at", "-id")
         .values("created_at")[:1]
     )
     pending_qs = (
@@ -90,7 +100,10 @@ def pipeline_summary() -> dict:
             "mission_id": m.id,
             "name": m.name,
             "submitted_at": m.submitted_at,
-            "age_days": (today - m.submitted_at.date()).days,
+            # localtime(): `submitted_at` is an aware UTC datetime, `today` is a local
+            # date. Taking `.date()` off the UTC value mixed the two and could report a
+            # negative age for a mission submitted a few hours ago.
+            "age_days": (today - timezone.localtime(m.submitted_at).date()).days,
         }
         for m in pending_qs
     ]
@@ -122,7 +135,7 @@ def staffing_readiness() -> list[dict]:
     computation to `mission_coverage` — coverage/fully-covered/accepted-count are never
     recomputed here. See module docstring for the query-count characteristics.
     """
-    today = dt.date.today()
+    today = timezone.localdate()
     missions = (
         Mission.objects.filter(status__in=_READINESS_STATUSES)
         # NOT end_date__gte(today): see module docstring.
@@ -163,7 +176,7 @@ def crew_utilization(window_days: int = 90) -> dict:
     restating "approved/active" or the overlap test. Two queries total: the crew list
     and the committed assignments, both independent of how many missions or crew exist.
     """
-    today = dt.date.today()
+    today = timezone.localdate()
     window_end = today + dt.timedelta(days=window_days - 1)
 
     crew = list(
@@ -198,50 +211,106 @@ def crew_utilization(window_days: int = 90) -> dict:
 
 
 def skill_gaps() -> list[dict]:
-    """Per-skill open-seat demand vs. qualified active crew, for open missions.
+    """Per-(skill, proficiency band) open-seat demand vs. qualified active crew.
 
-    "Open" = draft/pending_approval/approved/active and not yet ended. Two queries
-    total, independent of how many skills/missions/crew exist: one grouped aggregate
-    for seat totals and per-skill proficiency thresholds, one for the crew who qualify
-    against every threshold at once (grouped in Python, not one query per skill).
+    "Open" = draft/pending_approval/approved/active and not yet ended.
+
+    Two things this deliberately does NOT do, both of which it used to:
+
+    * It does not collapse a skill's requirement rows with `Min("min_proficiency")`.
+      Rows `[Pilot >=9 x1, Pilot >=2 x1]` against five crew at proficiency 2 reported
+      `gap=False`, because every one of them cleared the *easiest* threshold while the
+      seat total included the hardest -- actively hiding a real gap at >=9. Each
+      threshold band is now compared against its own qualified pool, so the output has
+      one row per (skill, min_proficiency) rather than one per skill.
+    * It does not report gross demand as "open seats". `Sum("required_count")` never
+      subtracted the seats already filled, so a fully-crewed mission still contributed
+      its whole seat count. Fills are computed by `staffing.fill_skill_seats` -- the
+      same greedy rule `mission_coverage` uses, so the dashboard and the mission page
+      cannot disagree about whether a seat is taken.
+
+    Three queries total, independent of how many skills/missions/crew exist: the
+    requirement rows, the accepted crew filling them, and the qualified-crew pool. The
+    per-mission seat fill runs in Python over data already fetched.
     """
-    today = dt.date.today()
-    requirement_rows = list(
+    today = timezone.localdate()
+    requirements = list(
         MissionRequirement.objects.filter(mission__status__in=OPEN_STATUSES)
         # NOT mission__end_date__gte(today): see module docstring.
         .exclude(mission__end_date__lt=today)
-        .values("skill_id", "skill__name")
-        .annotate(open_seats=Sum("required_count"), threshold=Min("min_proficiency"))
+        .values("mission_id", "skill_id", "skill__name", "min_proficiency", "required_count")
         .order_by()
     )
-    if not requirement_rows:
+    if not requirements:
         return []
 
-    skill_ids = [row["skill_id"] for row in requirement_rows]
-    thresholds = {row["skill_id"]: row["threshold"] for row in requirement_rows}
+    skill_ids = {row["skill_id"] for row in requirements}
+    mission_ids = {row["mission_id"] for row in requirements}
+    skill_names = {row["skill_id"]: row["skill__name"] for row in requirements}
 
-    qualified_users: dict[int, set[int]] = defaultdict(set)
+    # Query 2: who is already filling those missions' seats, and how good they are at
+    # each required skill. Accepted + active mirrors `staffing.accepted_assignments`.
+    fill_pool: dict[tuple[int, int], list[tuple[int, int]]] = defaultdict(list)
+    fill_rows = Assignment.objects.filter(
+        mission_id__in=mission_ids,
+        status=AssignmentStatus.ACCEPTED,
+        user__is_active=True,
+        user__crew_skills__skill_id__in=skill_ids,
+    ).values_list(
+        "mission_id",
+        "user__crew_skills__skill_id",
+        "user_id",
+        "user__crew_skills__proficiency",
+    )
+    for mission_id, skill_id, user_id, proficiency in fill_rows:
+        fill_pool[(mission_id, skill_id)].append((proficiency, user_id))
+    for pool in fill_pool.values():
+        pool.sort(key=lambda t: (-t[0], t[1]))
+
+    # Fill each mission's rows for one skill together -- a member fills at most one row
+    # per skill, so the rows compete for the same pool.
+    by_mission_skill: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    for row in requirements:
+        by_mission_skill[(row["mission_id"], row["skill_id"])].append(row)
+
+    open_seats: dict[tuple[int, int], int] = defaultdict(int)
+    for (mission_id, skill_id), rows in by_mission_skill.items():
+        rows.sort(key=lambda r: -r["min_proficiency"])
+        fills = fill_skill_seats(
+            [(r["min_proficiency"], r["required_count"]) for r in rows],
+            fill_pool.get((mission_id, skill_id), []),
+        )
+        for row, taken in zip(rows, fills, strict=True):
+            unfilled = row["required_count"] - len(taken)
+            # `+= 0` still materialises the key: a fully-covered band stays on the
+            # dashboard as "0 open seats, covered" rather than vanishing.
+            open_seats[(skill_id, row["min_proficiency"])] += unfilled
+
+    # Query 3: the qualified pool, counted against every threshold at once (grouped in
+    # Python, not one query per band).
+    thresholds_by_skill: dict[int, set[int]] = defaultdict(set)
+    for skill_id, min_proficiency in open_seats:
+        thresholds_by_skill[skill_id].add(min_proficiency)
+
+    qualified: dict[tuple[int, int], int] = defaultdict(int)
     crew_skill_rows = CrewSkill.objects.filter(
         skill_id__in=skill_ids, user__role=Role.CREW_MEMBER, user__is_active=True
-    ).values_list("skill_id", "user_id", "proficiency")
-    for skill_id, user_id, proficiency in crew_skill_rows:
-        if proficiency >= thresholds[skill_id]:
-            qualified_users[skill_id].add(user_id)
+    ).values_list("skill_id", "proficiency")
+    for skill_id, proficiency in crew_skill_rows:
+        for threshold in thresholds_by_skill.get(skill_id, ()):
+            if proficiency >= threshold:
+                qualified[(skill_id, threshold)] += 1
 
-    gaps = []
-    for row in requirement_rows:
-        skill_id = row["skill_id"]
-        open_seats = row["open_seats"]
-        qualified_crew = len(qualified_users.get(skill_id, ()))
-        gaps.append(
-            {
-                "skill_id": skill_id,
-                "skill_name": row["skill__name"],
-                "open_seats": open_seats,
-                "qualified_crew": qualified_crew,
-                "gap": open_seats > qualified_crew,
-            }
-        )
-
-    gaps.sort(key=lambda g: (not g["gap"], g["skill_name"]))
+    gaps = [
+        {
+            "skill_id": skill_id,
+            "skill_name": skill_names[skill_id],
+            "min_proficiency": min_proficiency,
+            "open_seats": seats,
+            "qualified_crew": qualified.get((skill_id, min_proficiency), 0),
+            "gap": seats > qualified.get((skill_id, min_proficiency), 0),
+        }
+        for (skill_id, min_proficiency), seats in open_seats.items()
+    ]
+    gaps.sort(key=lambda g: (not g["gap"], g["skill_name"], -g["min_proficiency"]))
     return gaps

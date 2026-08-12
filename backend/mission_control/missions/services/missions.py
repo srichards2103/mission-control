@@ -1,7 +1,7 @@
-import datetime as dt
 from dataclasses import dataclass
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
 from mission_control.common.exceptions import ApplicationError
@@ -144,11 +144,15 @@ def _run_guards(action: str, mission: Mission) -> None:
         raise ApplicationError("Add at least one skill requirement before submitting.")
     if action == "approve":
         _validate_staffing_for_approval(mission)
+    # `timezone.localdate()`, not `dt.date.today()`: the FSM's date guards must run in
+    # the project timezone (TIME_ZONE), not whatever the container happens to be set to.
+    # `start_date`/`end_date` are DateFields that a user picked in the org's calendar,
+    # and near midnight the two answers differ by a day.
     if action == "activate":
-        if mission.start_date > dt.date.today():
+        if mission.start_date > timezone.localdate():
             raise ApplicationError("Mission cannot activate before its start date.")
         _validate_conflicts_for_activation(mission)
-    if action == "complete" and mission.end_date > dt.date.today():
+    if action == "complete" and mission.end_date > timezone.localdate():
         raise ApplicationError("Mission cannot complete before its end date.")
 
 

@@ -320,3 +320,33 @@ def test_creator_cannot_reject_own_mission(mission_with_requirement):
         transition_mission(
             actor=creator_promoted_to_director, mission=mission, action="reject", reason="No"
         )
+
+
+# ------------------------------------------------------- date guards use the project timezone
+
+
+def test_activate_and_complete_guards_read_the_project_timezone(monkeypatch):
+    """The activate/complete guards compared `DateField`s a user picked in the
+    organisation's calendar against `dt.date.today()`, which is the *container's* local
+    date. Near midnight the two answers differ by a day, and the container's timezone is
+    an infrastructure detail, not a business one. They now read
+    `django.utils.timezone.localdate()`, which follows `TIME_ZONE`.
+
+    Patching `localdate` (rather than shifting `TIME_ZONE` and hoping the wall clock
+    cooperates) makes the difference deterministic: the mission starts and ends five days
+    after the container's today, so the old code refuses both transitions no matter when
+    the suite runs.
+    """
+    from django.utils import timezone
+
+    start = dt.date.today() + dt.timedelta(days=5)
+    mission = MissionFactory(
+        status=MissionStatus.APPROVED, start_date=start, end_date=start
+    )
+    set_current_tenant_id(mission.tenant_id)
+    monkeypatch.setattr(timezone, "localdate", lambda *a, **kw: start)
+
+    activated = transition_mission(actor=mission.created_by, mission=mission, action="activate")
+    assert activated.status == MissionStatus.ACTIVE
+    completed = transition_mission(actor=mission.created_by, mission=mission, action="complete")
+    assert completed.status == MissionStatus.COMPLETED
