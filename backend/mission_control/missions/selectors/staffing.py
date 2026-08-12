@@ -7,6 +7,16 @@
 Every consumer (approve guard, matcher, dashboard, staffing panel) calls into this
 module rather than re-deriving the predicate, so `_hard_block_qs` and `_overlapping`
 below are the only places the rule is expressed.
+
+Two deliberate narrowings of the prose, both settled and not bugs:
+
+* An assignment on a `completed` or `cancelled` mission yields no soft conflict, even
+  though spec §9's wording says "proposed anywhere" — §9's own enumeration of soft
+  conflicts is a closed list of draft/pending/rejected. A finished or abandoned mission
+  cannot compete for anyone's time.
+* Seat filling ignores deactivated members (see `_accepted_assignments_qs`); the
+  hard-block predicate itself does not, because the global availability rule is stated
+  purely in terms of assignment status, mission status and dates.
 """
 
 import datetime as dt
@@ -60,7 +70,12 @@ def _hard_block_qs(
 def hard_blocked_user_ids(
     *, start_date: dt.date, end_date: dt.date, exclude_mission_id: int | None = None
 ) -> set[int]:
-    """Users unavailable for the range because they are already committed elsewhere."""
+    """Users unavailable for the range because they are already committed elsewhere.
+
+    Pass `exclude_mission_id` whenever the range belongs to a mission you are staffing.
+    Without it, an already-approved/active mission's own accepted crew come back as
+    blocked — by themselves — because their assignment satisfies the predicate.
+    """
     qs = _hard_block_qs(
         start_date=start_date, end_date=end_date, exclude_mission_id=exclude_mission_id
     )
@@ -79,6 +94,9 @@ def soft_conflicts_for_users(
     Soft conflict = live (proposed or accepted) assignment on another still-relevant
     mission whose dates overlap, minus the hard blocks (which the caller handles
     separately). Defined by subtracting `_hard_block_qs` so the two can never drift.
+
+    Users with no conflicts are ABSENT from the returned dict rather than mapped to an
+    empty list — the common case returns `{}`. Callers must use `.get(user_id, [])`.
     """
     hard_block_ids = _hard_block_qs(
         start_date=start_date, end_date=end_date, exclude_mission_id=exclude_mission_id
@@ -108,6 +126,25 @@ def soft_conflicts_for_users(
     return dict(result)
 
 
+def _accepted_assignments_qs(mission: Mission) -> QuerySet[Assignment]:
+    """The accepted assignments that actually staff `mission`.
+
+    Deactivated members do not staff anything: `user_update` can flip `is_active` long
+    after someone accepted, and a member who can no longer log in cannot serve, so they
+    stop filling seats and stop counting toward `min_crew`/`max_crew`. Filtering here —
+    the one place both `mission_coverage` and `staffing_validation_errors` read accepted
+    assignments from — keeps the two from disagreeing.
+
+    Role is deliberately NOT filtered. Spec §9's "only crew members (role = CREW_MEMBER,
+    active) are assignable" is a guard on *creating* an assignment; promoting a serving
+    member to mission lead should not silently un-staff an approved mission, whereas
+    deactivating their account genuinely removes them.
+    """
+    return Assignment.objects.filter(
+        mission=mission, status=AssignmentStatus.ACCEPTED, user__is_active=True
+    )
+
+
 @dataclass
 class RequirementCoverage:
     requirement_id: int
@@ -127,7 +164,7 @@ class CoverageReport:
 
 
 def mission_coverage(mission: Mission) -> CoverageReport:
-    """Which requirement seats the mission's *accepted* crew fill.
+    """Which requirement seats the mission's *accepted, active* crew fill.
 
     Per spec §9: a member may count toward requirements of different skills at once,
     but fills at most one requirement row per skill. Within a skill, rows are served
@@ -142,11 +179,7 @@ def mission_coverage(mission: Mission) -> CoverageReport:
             "skill__name", "-min_proficiency", "id"
         )
     )
-    accepted = list(
-        Assignment.objects.filter(
-            mission=mission, status=AssignmentStatus.ACCEPTED
-        ).select_related("user")
-    )
+    accepted = list(_accepted_assignments_qs(mission).select_related("user"))
     accepted_users = {a.user_id: a.user for a in accepted}
 
     # One pass over the accepted crew's proficiencies in the required skills, grouped
@@ -232,11 +265,7 @@ def staffing_validation_errors(mission: Mission) -> list[str]:
             end_date=mission.end_date,
             exclude_mission_id=mission.id,
         )
-        .filter(
-            user_id__in=Assignment.objects.filter(
-                mission=mission, status=AssignmentStatus.ACCEPTED
-            ).values("user_id")
-        )
+        .filter(user_id__in=_accepted_assignments_qs(mission).values("user_id"))
         .select_related("mission", "user")
         .order_by("user__name", "user_id", "mission__start_date", "mission_id")
     )

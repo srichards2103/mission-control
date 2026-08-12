@@ -97,10 +97,12 @@ def test_status_axis_crossed_with_overlapping_dates(tenant_ctx, mission_status, 
     )
     a = AssignmentFactory(mission=other, status=assignment_status)
 
-    should_hard_block = (
-        assignment_status == AssignmentStatus.ACCEPTED
-        and mission_status in HARD_BLOCK_MISSION_STATUSES
-    )
+    # Literal, NOT HARD_BLOCK_MISSION_STATUSES: deriving the expectation from the
+    # production constant would keep all 28 cells green if the constant were widened.
+    should_hard_block = assignment_status == AssignmentStatus.ACCEPTED and mission_status in {
+        MissionStatus.APPROVED,
+        MissionStatus.ACTIVE,
+    }
     blocked = hard_blocked_user_ids(
         start_date=mission.start_date, end_date=mission.end_date, exclude_mission_id=mission.id
     )
@@ -554,3 +556,104 @@ def test_validation_errors_hard_block_lookup_is_not_per_member(
     with django_assert_num_queries(4):  # 3 for coverage + 1 for the hard-block join
         errors = staffing_validation_errors(mission)
     assert len([e for e in errors if "committed to 'Busy Op'" in e]) == 4
+
+
+# ------------------------------------------------------------------------- deactivation
+
+
+def test_hard_block_constant_is_exactly_approved_and_active():
+    """Pinned separately so the cross-product test can assert against a literal."""
+    assert HARD_BLOCK_MISSION_STATUSES == frozenset(
+        {MissionStatus.APPROVED, MissionStatus.ACTIVE}
+    )
+
+
+def test_deactivated_member_stops_filling_a_seat(tenant_ctx):
+    mission = tenant_ctx
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5, required_count=1)
+    ada = crew_with(mission, piloting, 9, name="Ada Lovelace")
+    AssignmentFactory(mission=mission, user=ada, status=AssignmentStatus.ACCEPTED)
+    assert mission_coverage(mission).fully_covered
+
+    ada.is_active = False  # deactivated long after accepting
+    ada.save()
+
+    report = mission_coverage(mission)
+    assert report.accepted_count == 0
+    assert report.requirements[0].filled_count == 0
+    assert report.requirements[0].filled_by == []
+    assert not report.fully_covered
+
+
+def test_deactivated_member_produces_validation_errors(tenant_ctx):
+    mission = tenant_ctx  # min_crew=1
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5, required_count=1)
+    ada = crew_with(mission, piloting, 9, name="Ada Lovelace")
+    AssignmentFactory(mission=mission, user=ada, status=AssignmentStatus.ACCEPTED)
+    assert staffing_validation_errors(mission) == []
+
+    ada.is_active = False
+    ada.save()
+
+    errors = staffing_validation_errors(mission)
+    assert any(e.startswith("Requirement Piloting ≥5 needs 1, has 0") for e in errors)
+    assert any("min_crew" in e for e in errors)
+
+
+def test_deactivated_member_is_not_reported_as_committed_elsewhere(tenant_ctx):
+    """Coverage and the hard-block error agree: a deactivated member is simply not there."""
+    mission = tenant_ctx
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=1, required_count=1)
+    ada = crew_with(mission, piloting, 9, name="Ada Lovelace")
+    AssignmentFactory(mission=mission, user=ada, status=AssignmentStatus.ACCEPTED)
+    elsewhere = other_mission(
+        mission,
+        status=MissionStatus.APPROVED,
+        start=D(2026, 9, 10),
+        end=D(2026, 9, 20),
+        name="Ganymede Survey",
+    )
+    AssignmentFactory(mission=elsewhere, user=ada, status=AssignmentStatus.ACCEPTED)
+    assert any("committed to" in e for e in staffing_validation_errors(mission))
+
+    ada.is_active = False
+    ada.save()
+
+    assert not any("committed to" in e for e in staffing_validation_errors(mission))
+
+
+def test_active_members_still_fill_seats_when_a_colleague_is_deactivated(tenant_ctx):
+    mission = tenant_ctx
+    mission.max_crew = 3
+    mission.save()
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5, required_count=1)
+    gone = crew_with(mission, piloting, 10, name="Gone")
+    stays = crew_with(mission, piloting, 6, name="Stays")
+    for user in (gone, stays):
+        AssignmentFactory(mission=mission, user=user, status=AssignmentStatus.ACCEPTED)
+    gone.is_active = False
+    gone.save()
+
+    report = mission_coverage(mission)
+    assert report.accepted_count == 1
+    assert [f["name"] for f in report.requirements[0].filled_by] == ["Stays"]
+    assert report.fully_covered
+    assert staffing_validation_errors(mission) == []
+
+
+def test_deactivation_does_not_change_the_hard_block_predicate(tenant_ctx):
+    """Availability is stated purely in terms of statuses and dates — leave it alone."""
+    mission = tenant_ctx
+    blocker = other_mission(
+        mission, status=MissionStatus.ACTIVE, start=D(2026, 9, 5), end=D(2026, 9, 15)
+    )
+    a = AssignmentFactory(mission=blocker, status=AssignmentStatus.ACCEPTED)
+    a.user.is_active = False
+    a.user.save()
+    assert a.user_id in hard_blocked_user_ids(
+        start_date=mission.start_date, end_date=mission.end_date
+    )
