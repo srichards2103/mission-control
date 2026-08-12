@@ -38,6 +38,7 @@ import datetime as dt
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from mission_control.missions.models import Mission
 from mission_control.missions.services.assignments import assignment_respond, assignments_propose
@@ -80,7 +81,9 @@ TENANTS = [
 
 
 def _d(offset_days: int) -> dt.date:
-    return dt.date.today() + dt.timedelta(days=offset_days)
+    # localdate(), like the FSM's activate/complete guards: the seeded "starts today"
+    # mission must be activatable by the same clock the guards read.
+    return timezone.localdate() + dt.timedelta(days=offset_days)
 
 
 class Command(BaseCommand):
