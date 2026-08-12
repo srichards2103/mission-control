@@ -1,8 +1,11 @@
 from django.db import transaction
 
+from mission_control.common.db import integrity_error_as
 from mission_control.common.exceptions import ApplicationError
 from mission_control.tenants.context import require_current_tenant_id
-from mission_control.users.models import CrewSkill, Skill, User
+from mission_control.users.models import SKILL_NAME_TAKEN, CrewSkill, Skill, User
+
+EMAIL_TAKEN = "A user with this email already exists."
 
 
 def skill_create(*, actor, name: str, description: str = "") -> Skill:
@@ -10,7 +13,11 @@ def skill_create(*, actor, name: str, description: str = "") -> Skill:
     # unique validation and turn duplicate names into 500s instead of 400s.
     skill = Skill(name=name, description=description, tenant_id=require_current_tenant_id())
     skill.full_clean()
-    skill.save()
+    # full_clean's validate_constraints() is a non-locking SELECT; see
+    # `integrity_error_as` for why the INSERT still needs its own guard, and why the
+    # message it raises is the one the sequential path produces.
+    with integrity_error_as("Validation error", {"fields": {"__all__": [SKILL_NAME_TAKEN]}}):
+        skill.save()
     return skill
 
 
@@ -50,14 +57,15 @@ def user_create(*, actor, email: str, name: str, role: str, password: str) -> Us
     # case-sensitive) so a same-address-different-case collision also surfaces as the
     # standard {"message": "Validation error", "extra": {"fields": {...}}} 400 envelope
     # instead of a raw IntegrityError 500.
+    duplicate = {"fields": {"email": [EMAIL_TAKEN]}}
     if User.objects.filter(email__iexact=email).exists():
-        raise ApplicationError(
-            "Validation error",
-            extra={"fields": {"email": ["A user with this email already exists."]}},
+        raise ApplicationError("Validation error", extra=duplicate)
+    # The check above is a non-locking SELECT, so a concurrent create of the same
+    # address still loses the race at the INSERT; report it identically.
+    with integrity_error_as("Validation error", duplicate):
+        user = User.objects.create_user(
+            email=email, password=password, tenant=actor.tenant, role=role, name=name
         )
-    user = User.objects.create_user(
-        email=email, password=password, tenant=actor.tenant, role=role, name=name
-    )
     return user
 
 

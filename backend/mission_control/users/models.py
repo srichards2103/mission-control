@@ -62,6 +62,11 @@ class User(AbstractBaseUser, BaseModel):
         return self.email
 
 
+# Named once: both the DB constraint below and `services.skill_create`'s lost-race
+# handler report the same sentence, so a client cannot tell the two paths apart.
+SKILL_NAME_TAKEN = "A skill with this name already exists."
+
+
 class Skill(TenantModel):
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
@@ -73,7 +78,7 @@ class Skill(TenantModel):
                 Lower("name"),
                 "tenant",
                 name="skill_name_per_tenant_uniq",
-                violation_error_message="A skill with this name already exists.",
+                violation_error_message=SKILL_NAME_TAKEN,
             ),
             models.UniqueConstraint(
                 fields=["tenant", "id"],
