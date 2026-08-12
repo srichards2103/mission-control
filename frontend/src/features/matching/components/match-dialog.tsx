@@ -284,7 +284,7 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
                                 <SelectContent>
                                   {alt.candidates.map((candidate) => (
                                     <SelectItem key={candidate.user_id} value={String(candidate.user_id)}>
-                                      {candidate.name} (score {candidate.score})
+                                      {candidate.name} (score {candidate.score.toFixed(2)})
                                     </SelectItem>
                                   ))}
                                 </SelectContent>

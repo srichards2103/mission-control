@@ -96,7 +96,11 @@ export function MissionCreateDialog() {
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="mission-name">Name</Label>
             <Input id="mission-name" value={name} onChange={(e) => setName(e.target.value)} required />
-            {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name.join(" ")}</p>}
+            {fieldErrors.name && (
+              <p role="alert" className="text-sm text-destructive">
+                {fieldErrors.name.join(" ")}
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="mission-description">Description</Label>
@@ -106,7 +110,7 @@ export function MissionCreateDialog() {
               onChange={(e) => setDescription(e.target.value)}
             />
             {fieldErrors.description && (
-              <p className="text-sm text-destructive">{fieldErrors.description.join(" ")}</p>
+              <p role="alert" className="text-sm text-destructive">{fieldErrors.description.join(" ")}</p>
             )}
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -120,7 +124,7 @@ export function MissionCreateDialog() {
                 required
               />
               {fieldErrors.start_date && (
-                <p className="text-sm text-destructive">{fieldErrors.start_date.join(" ")}</p>
+                <p role="alert" className="text-sm text-destructive">{fieldErrors.start_date.join(" ")}</p>
               )}
             </div>
             <div className="flex flex-col gap-1.5">
@@ -133,7 +137,7 @@ export function MissionCreateDialog() {
                 required
               />
               {fieldErrors.end_date && (
-                <p className="text-sm text-destructive">{fieldErrors.end_date.join(" ")}</p>
+                <p role="alert" className="text-sm text-destructive">{fieldErrors.end_date.join(" ")}</p>
               )}
             </div>
           </div>
@@ -149,7 +153,7 @@ export function MissionCreateDialog() {
                 required
               />
               {fieldErrors.min_crew && (
-                <p className="text-sm text-destructive">{fieldErrors.min_crew.join(" ")}</p>
+                <p role="alert" className="text-sm text-destructive">{fieldErrors.min_crew.join(" ")}</p>
               )}
             </div>
             <div className="flex flex-col gap-1.5">
@@ -163,7 +167,7 @@ export function MissionCreateDialog() {
                 required
               />
               {fieldErrors.max_crew && (
-                <p className="text-sm text-destructive">{fieldErrors.max_crew.join(" ")}</p>
+                <p role="alert" className="text-sm text-destructive">{fieldErrors.max_crew.join(" ")}</p>
               )}
             </div>
           </div>
