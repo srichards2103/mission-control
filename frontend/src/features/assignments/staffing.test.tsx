@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
@@ -179,6 +179,108 @@ describe("staffing panel", () => {
     // /remove/i, so this must not accidentally assert against that button instead.
     const roster = screen.getByRole("list", { name: /roster/i });
     expect(within(roster).queryByRole("button", { name: /^remove/i })).not.toBeInTheDocument();
+  });
+
+  it("shows both chips at once when a roster member is hard-blocked and also has a soft conflict", async () => {
+    server.use(
+      http.get("/api/v1/missions/10/staffing/", () =>
+        HttpResponse.json({
+          ...twoPersonRoster,
+          roster: [
+            {
+              assignment_id: 105,
+              user_id: 6,
+              name: "Riley Chen",
+              status: "accepted",
+              soft_conflicts: [
+                {
+                  mission_id: 21,
+                  mission_name: "Europa Drill",
+                  mission_status: "draft",
+                  assignment_status: "proposed",
+                },
+              ],
+              hard_blocked: true,
+            },
+          ],
+        }),
+      ),
+    );
+    renderAt("/missions/10");
+    expect(await screen.findByText(/riley chen/i)).toBeInTheDocument();
+    // The two conditionals are independent, not mutually exclusive -- both chips
+    // render for the same roster row.
+    expect(screen.getByText(/unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/^conflict$/i)).toBeInTheDocument();
+  });
+
+  it("shows the server's message inline in the Add crew dialog when propose is refused (e.g. a hard-blocked candidate)", async () => {
+    server.use(
+      http.post("/api/v1/missions/10/assignments/", () =>
+        HttpResponse.json(
+          { message: "Unavailable for these dates: Crew Member.", extra: {} },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderAt("/missions/10");
+    await userEvent.click(await screen.findByRole("button", { name: /add crew/i }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: /crew member/i }));
+    await userEvent.click(within(dialog).getByRole("button", { name: /propose/i }));
+    // Inline, scoped to the still-open dialog -- not just a toast the user might miss.
+    expect(await within(dialog).findByText(/unavailable for these dates: crew member/i)).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+  });
+
+  it("shows the server's message via toast when removing a roster member is refused", async () => {
+    server.use(http.get("/api/v1/missions/10/staffing/", () => HttpResponse.json(twoPersonRoster)));
+    server.use(
+      http.post("/api/v1/assignments/:id/remove/", () =>
+        HttpResponse.json(
+          { message: "Only proposed or accepted assignments can be removed.", extra: {} },
+          { status: 400 },
+        ),
+      ),
+    );
+    renderAt("/missions/10");
+    await screen.findByText(/1\/2/);
+    const roster = screen.getByRole("list", { name: /roster/i });
+    await userEvent.click(within(roster).getByRole("button", { name: /remove sam okafor/i }));
+    // Remove has no form to attach an inline error to (single click per row, no
+    // surrounding form state) -- the toast is the only surface, per the existing
+    // transition-buttons.tsx pattern for bare actions.
+    expect(
+      await screen.findByText(/only proposed or accepted assignments can be removed/i),
+    ).toBeInTheDocument();
+  });
+
+  it("only disables the row being removed while its removal is in flight, not every row", async () => {
+    server.use(http.get("/api/v1/missions/10/staffing/", () => HttpResponse.json(twoPersonRoster)));
+    // A mutable holder object rather than a bare `let` -- a bare `let resolve: T | null`
+    // reassigned only inside this nested closure trips a TS control-flow-narrowing
+    // quirk that types the later `resolveRemove?.()` call as `never`.
+    const deferred: { resolve: (() => void) | null } = { resolve: null };
+    server.use(
+      http.post("/api/v1/assignments/:id/remove/", async () => {
+        await new Promise<void>((resolve) => {
+          deferred.resolve = resolve;
+        });
+        return HttpResponse.json(twoPersonRoster);
+      }),
+    );
+    renderAt("/missions/10");
+    await screen.findByText(/1\/2/);
+    const roster = screen.getByRole("list", { name: /roster/i });
+    const removeSam = within(roster).getByRole("button", { name: /remove sam okafor/i });
+    const removePriya = within(roster).getByRole("button", { name: /remove priya nair/i });
+
+    await userEvent.click(removeSam);
+    expect(removeSam).toBeDisabled();
+    expect(removePriya).toBeEnabled();
+
+    deferred.resolve?.();
+    await waitFor(() => expect(removeSam).toBeEnabled());
   });
 
   it("shows an error state when staffing fails to load", async () => {

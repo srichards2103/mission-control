@@ -13,6 +13,11 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
   const { data: staffing, isLoading, isError } = useStaffing(missionId);
   const removeAssignment = useRemoveAssignment(missionId);
   const [addCrewOpen, setAddCrewOpen] = useState(false);
+  // Tracks which single roster row is mid-removal, so an in-flight removal only
+  // disables that row's own Remove button rather than every row's (removeAssignment
+  // is one shared mutation object for the whole panel; isPending alone can't tell
+  // rows apart).
+  const [removingId, setRemovingId] = useState<number | null>(null);
   const canManage = hasPermission(user, "assignment.manage");
 
   // isLoading -> isError -> data, in that order (see mission-detail-page.tsx and
@@ -29,10 +34,13 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
   }
 
   async function handleRemove(assignmentId: number) {
+    setRemovingId(assignmentId);
     try {
       await removeAssignment.mutateAsync(assignmentId);
     } catch (err) {
       toast.error(errorMessage(err));
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -115,7 +123,7 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
                     size="sm"
                     variant="outline"
                     aria-label={`Remove ${entry.name}`}
-                    disabled={removeAssignment.isPending}
+                    disabled={removingId === entry.assignment_id}
                     onClick={() => handleRemove(entry.assignment_id)}
                   >
                     Remove
