@@ -2,12 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { api } from "@/lib/api-client";
 import { PaginatedSchema } from "@/features/skills/api/skills";
+import { RoleSchema } from "@/lib/roles";
 
 export const OrgUserSchema = z.object({
   id: z.number(),
   name: z.string(),
   email: z.string(),
-  role: z.enum(["director", "mission_lead", "crew_member"]),
+  role: RoleSchema,
   is_active: z.boolean(),
 });
 export type OrgUser = z.infer<typeof OrgUserSchema>;

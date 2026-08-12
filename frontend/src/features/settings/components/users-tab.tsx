@@ -17,16 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCreateUser, useOrgUsers, useUpdateUser, type OrgUser } from "@/features/settings/api/settings";
 import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
-
-const ROLES: { value: OrgUser["role"]; label: string }[] = [
-  { value: "director", label: "Director" },
-  { value: "mission_lead", label: "Mission Lead" },
-  { value: "crew_member", label: "Crew Member" },
-];
-
-function roleLabel(role: string): string {
-  return ROLES.find((r) => r.value === role)?.label ?? role;
-}
+import { ROLE_OPTIONS, roleLabel } from "@/lib/roles";
 
 function AddUserDialog() {
   const [open, setOpen] = useState(false);
@@ -109,7 +100,7 @@ function AddUserDialog() {
                 <SelectValue>{(value: OrgUser["role"]) => roleLabel(value)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {ROLES.map((r) => (
+                {ROLE_OPTIONS.map((r) => (
                   <SelectItem key={r.value} value={r.value}>
                     {r.label}
                   </SelectItem>
@@ -144,7 +135,7 @@ function RoleSelect({ user }: { user: OrgUser }) {
         <SelectValue>{(value: OrgUser["role"]) => roleLabel(value)}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        {ROLES.map((r) => (
+        {ROLE_OPTIONS.map((r) => (
           <SelectItem key={r.value} value={r.value}>
             {r.label}
           </SelectItem>

@@ -31,4 +31,29 @@ describe("auth shell", () => {
     renderApp("/");
     expect(await screen.findByRole("heading", { name: /my assignments/i })).toBeInTheDocument();
   });
+
+  // F2: the login form used to carry its own private, drifted errorMessage() that
+  // only ever read the top-level "message" field, so a non-field validation error
+  // (pinned to the generic "Validation error" string) showed nothing useful. It now
+  // shares lib/api-errors.ts's errorMessage(), which unwraps __all__/non_field_errors.
+  it("shows the real reason, not a bare 'Validation error', when login fails with a non-field error", async () => {
+    server.use(
+      http.post("/api/v1/auth/token/", () =>
+        HttpResponse.json(
+          {
+            message: "Validation error",
+            extra: { fields: { __all__: ["This account has been deactivated."] } },
+          },
+          { status: 401 },
+        ),
+      ),
+    );
+    renderApp("/login");
+    await userEvent.type(await screen.findByLabelText(/email/i), "lead@helios.test");
+    await userEvent.type(screen.getByLabelText(/password/i), "pw");
+    await userEvent.click(screen.getByRole("button", { name: /sign in/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/this account has been deactivated/i);
+    expect(screen.queryByText(/^validation error$/i)).not.toBeInTheDocument();
+  });
 });

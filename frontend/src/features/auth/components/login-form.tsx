@@ -1,18 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { AxiosError } from "axios";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { login } from "@/features/auth/api/auth";
-
-function errorMessage(err: unknown): string {
-  if (err instanceof AxiosError && typeof err.response?.data?.message === "string") {
-    return err.response.data.message;
-  }
-  return "Something went wrong. Please try again.";
-}
+import { errorMessage } from "@/lib/api-errors";
 
 export function LoginForm() {
   const [email, setEmail] = useState("");
