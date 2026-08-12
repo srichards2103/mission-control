@@ -68,22 +68,39 @@ def _ensure_not_reviewing_own_mission(actor, mission: Mission) -> None:
 
 
 def _lock_accepted_crew(mission: Mission) -> None:
-    """Row-lock the mission's accepted crew's `User` rows.
+    """Row-lock the mission's accepted crew's `User` rows, in a deterministic order.
 
     Serializes competing approvals/activations that share crew members: whichever
     transition gets here first holds the lock until its transaction commits, so the
     second one to run sees the first one's committed state (e.g. a hard-block conflict
     it just created) rather than a stale read from before it started.
+
+    Sourced from `_accepted_assignments_qs` -- the Task 4.2 selectors' one definition of
+    "this mission's accepted crew" (accepted assignment + `user__is_active=True`) --
+    rather than re-deriving it here, so this can never quietly diverge from what
+    `mission_coverage`/`staffing_validation_errors` count. `User` does not inherit
+    `TenantModel` and `User.objects` is not tenant-scoped (see project constraints), so
+    the explicit `tenant_id` filter is load-bearing, matching the precedent in
+    `services/assignments.py`.
+
+    `.order_by("id")` is not decoration: Postgres locks rows in scan order, and without
+    a fixed order two transactions approving/activating missions that share two or more
+    crew members could acquire the same `User` rows in opposite orders and deadlock --
+    the loser's `DeadlockDetected` is neither an `ApplicationError` nor a DRF exception,
+    so it would surface as an unhandled 500. `LockRows` sits above `Sort` in the query
+    plan, so ordering the queryset here is sufficient to fix the lock order.
     """
-    from mission_control.missions.models import Assignment, AssignmentStatus
+    from mission_control.missions.selectors.staffing import _accepted_assignments_qs
     from mission_control.users.models import User
 
     accepted_user_ids = list(
-        Assignment.objects.filter(
-            mission=mission, status=AssignmentStatus.ACCEPTED
-        ).values_list("user_id", flat=True)
+        _accepted_assignments_qs(mission).values_list("user_id", flat=True)
     )
-    list(User.objects.select_for_update().filter(id__in=accepted_user_ids))
+    list(
+        User.objects.select_for_update()
+        .filter(id__in=accepted_user_ids, tenant_id=mission.tenant_id)
+        .order_by("id")
+    )
 
 
 def _validate_staffing_for_approval(mission: Mission) -> None:
@@ -105,13 +122,15 @@ def _validate_conflicts_for_activation(mission: Mission) -> None:
 
     Spec §8 describes activate's staffing check as "re-runs conflict check (belt and
     braces)" -- narrower than approve's full "staffing valid". Coverage/crew-bounds
-    were already proven at approve time and cannot silently regress except via
-    `assignment_remove` (a lead/director action, independent of this FSM); re-running
-    the full validation here would block activation of an already-approved mission
-    whose crew member was later removed or declined, which the plan does not intend.
-    What CAN change between approve and activate is a *different* mission getting
-    approved in the meantime and hard-blocking one of this mission's accepted crew --
-    that is what this re-check exists to catch.
+    proven at approve time CAN regress before activation -- via `assignment_remove` (a
+    lead/director action, independent of this FSM) flipping an accepted assignment to
+    `removed`, or via a crew member being deactivated, which drops them out of
+    `_accepted_assignments_qs` per the Task 4.2 ruling that deactivated crew stop
+    filling seats -- and re-running the full validation here would block activation of
+    an already-approved mission over exactly that kind of change, which the plan does
+    not intend. What CAN'T be caught any other way, and so is the one thing this
+    re-check exists for, is a *different* mission getting approved in the meantime and
+    hard-blocking one of this mission's accepted crew.
     """
     from mission_control.missions.selectors.staffing import mission_conflict_errors
 
