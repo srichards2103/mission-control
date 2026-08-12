@@ -11,6 +11,10 @@ from mission_control.missions.factories import (
 )
 from mission_control.missions.models import AssignmentStatus, MissionStatus
 from mission_control.missions.services.matching import (
+    ALL_QUALIFIED_UNAVAILABLE,
+    MAX_CREW_TOO_SMALL,
+    NO_QUALIFIED_CREW,
+    NOT_ENOUGH_QUALIFIED_CREW,
     W_PROFICIENCY,
     W_SOFT_CONFLICT,
     W_WORKLOAD,
@@ -110,7 +114,10 @@ def test_infeasible_diagnoses(mission):
     busy_on(mission, blocked, start=D(2026, 9, 5), end=D(2026, 9, 15))
     result = match_mission(mission)
     reasons = {u.skill_name: u.reason for u in result.unfilled_seats}
-    assert reasons == {"Piloting": "no qualified crew", "Welding": "all qualified crew unavailable"}
+    assert reasons == {
+        "Piloting": NO_QUALIFIED_CREW,
+        "Welding": ALL_QUALIFIED_UNAVAILABLE,
+    }
 
 
 def test_top_up_to_min_crew(mission):
@@ -261,9 +268,12 @@ def test_one_seat_per_skill_and_the_most_demanding_one(mission):
     result = match_mission(mission)
     ace_member = next(m for m in result.team if m.user_id == ace.id)
     assert [s["requirement_id"] for s in ace_member.seats] == [hard.id]
+    # Room to spare (open_capacity 3) and nobody blocked: the roster is just too thin,
+    # which is NOT "max_crew too small" — that would contradict open_capacity.
     assert [(u.requirement_id, u.reason) for u in result.unfilled_seats] == [
-        (easy.id, "max_crew too small")
+        (easy.id, NOT_ENOUGH_QUALIFIED_CREW)
     ]
+    assert result.open_capacity == 3
 
 
 def test_capacity_is_limited_by_max_crew(mission):
@@ -276,7 +286,7 @@ def test_capacity_is_limited_by_max_crew(mission):
     result = match_mission(mission)
     assert len(result.team) == 2
     assert result.open_capacity == 0
-    assert [u.reason for u in result.unfilled_seats] == ["max_crew too small"]
+    assert [u.reason for u in result.unfilled_seats] == [MAX_CREW_TOO_SMALL]
 
 
 def test_open_capacity_accounts_for_live_assignments(mission):
@@ -289,6 +299,89 @@ def test_open_capacity_accounts_for_live_assignments(mission):
     # max_crew 4 - 1 live assignment = 3 capacity, one of which the newcomer takes.
     assert result.open_capacity == 2
     assert sitting.id not in {m.user_id for m in result.team}
+
+
+@pytest.mark.parametrize("live_status", [AssignmentStatus.PROPOSED, AssignmentStatus.ACCEPTED])
+def test_deactivated_live_member_frees_their_seat(mission, live_status):
+    """A member deactivated after being staffed holds neither capacity nor a min_crew slot.
+
+    Per the standing ruling, deactivated crew do not fill staffing seats. If their live
+    assignment still consumed a max_crew seat, the matcher would under-propose and stop
+    the top-up early, handing back a team the approve guard then rejects as short.
+    """
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5)
+    mission.min_crew = 2
+    mission.save()
+    ghost = crew_with(mission, {piloting: 9}, "Ghost")
+    AssignmentFactory(mission=mission, user=ghost, status=live_status)
+    ghost.is_active = False
+    ghost.save()
+    crew_with(mission, {piloting: 7}, "Pilot")
+    crew_with(mission, {}, "Extra Hands")
+
+    result = match_mission(mission)
+    # The seat the ghost appeared to hold is open again, and the top-up runs to min_crew.
+    assert [m.name for m in result.team] == ["Pilot", "Extra Hands"]
+    assert ghost.id not in {m.user_id for m in result.team}
+    assert result.unfilled_seats == []
+    assert result.open_capacity == 2  # max_crew 4 - 2 proposed; the ghost costs nothing
+
+
+def test_active_live_member_still_consumes_capacity(mission):
+    """The control for the test above: an *active* live member does hold their seat."""
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5)
+    mission.min_crew = 2
+    mission.save()
+    sitting = crew_with(mission, {piloting: 9}, "Sitting")
+    AssignmentFactory(mission=mission, user=sitting, status=AssignmentStatus.PROPOSED)
+    crew_with(mission, {piloting: 7}, "Pilot")
+    crew_with(mission, {}, "Extra Hands")
+
+    result = match_mission(mission)
+    assert [m.name for m in result.team] == ["Pilot"]  # live 1 + team 1 already meets min_crew
+    assert result.open_capacity == 2  # max_crew 4 - 1 live - 1 proposed
+
+
+def test_thin_roster_is_not_reported_as_max_crew_too_small(mission):
+    """Two seats, one qualified person, plenty of room: the roster is the constraint."""
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5, required_count=2)
+    only = crew_with(mission, {piloting: 8}, "The Only One")
+
+    result = match_mission(mission)
+    assert [m.user_id for m in result.team] == [only.id]
+    assert [u.reason for u in result.unfilled_seats] == [NOT_ENOUGH_QUALIFIED_CREW]
+    assert result.open_capacity == 3  # not blocked, not full — just nobody else qualified
+
+
+def test_diagnosis_reasons_are_a_closed_set_of_four():
+    """Every reason the engine can emit, and the exact condition that produces it."""
+    assert {
+        NO_QUALIFIED_CREW,
+        ALL_QUALIFIED_UNAVAILABLE,
+        MAX_CREW_TOO_SMALL,
+        NOT_ENOUGH_QUALIFIED_CREW,
+    } == {
+        "no qualified crew",
+        "all qualified crew unavailable",
+        "max_crew too small",
+        "not enough qualified crew",
+    }
+
+
+def test_max_crew_too_small_is_only_reported_when_there_is_no_room(mission):
+    """`max_crew too small` and a non-zero `open_capacity` must never co-occur."""
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5, required_count=6)
+    for i in range(6):
+        crew_with(mission, {piloting: 7}, f"P{i}")
+
+    result = match_mission(mission)
+    assert len(result.team) == 4  # max_crew
+    assert result.open_capacity == 0
+    assert [u.reason for u in result.unfilled_seats] == [MAX_CREW_TOO_SMALL] * 2
 
 
 def test_mission_with_no_requirements_still_tops_up(mission):
@@ -309,7 +402,7 @@ def test_empty_roster_yields_an_empty_plan(mission):
     MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5)
     result = match_mission(mission)
     assert result.team == []
-    assert [u.reason for u in result.unfilled_seats] == ["no qualified crew"]
+    assert [u.reason for u in result.unfilled_seats] == [NO_QUALIFIED_CREW]
     assert result.alternatives[0].candidates == []
 
 
@@ -323,7 +416,7 @@ def test_inactive_and_non_crew_are_never_matched(mission):
     CrewSkillFactory(user=lead, skill=piloting, proficiency=10)
     result = match_mission(mission)
     assert result.team == []
-    assert [u.reason for u in result.unfilled_seats] == ["no qualified crew"]
+    assert [u.reason for u in result.unfilled_seats] == [NO_QUALIFIED_CREW]
 
 
 def test_other_tenants_crew_are_never_matched(mission):
@@ -334,14 +427,14 @@ def test_other_tenants_crew_are_never_matched(mission):
     crew_with(other_mission, {other_skill: 10}, "Foreign Ace")
     result = match_mission(mission)
     assert result.team == []
-    assert [u.reason for u in result.unfilled_seats] == ["no qualified crew"]
+    assert [u.reason for u in result.unfilled_seats] == [NO_QUALIFIED_CREW]
 
 
 def test_unfilled_seat_is_reported_once_per_open_seat(mission):
     piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
     MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5, required_count=3)
     result = match_mission(mission)
-    assert [u.reason for u in result.unfilled_seats] == ["no qualified crew"] * 3
+    assert [u.reason for u in result.unfilled_seats] == [NO_QUALIFIED_CREW] * 3
 
 
 # ---------------------------------------------------------------------- alternatives
@@ -355,8 +448,39 @@ def test_alternatives_are_ranked_by_score_descending(mission):
     alt = result.alternatives[0]
     assert [c["user_id"] for c in alt.candidates] == [p.id for p in people[1:4]]
     assert [c["proficiency"] for c in alt.candidates] == [8, 7, 6]
+    # Exact scores, each computed for THIS requirement's seat: fit = (prof - 5) / 9,
+    # balance 1, no penalty. Scoring the bench with no seat would make all three 0.5.
+    assert [c["score"] for c in alt.candidates] == [
+        round(3 / 9 + 0.5, 3),
+        round(2 / 9 + 0.5, 3),
+        round(1 / 9 + 0.5, 3),
+    ]
     assert alt.candidates == sorted(alt.candidates, key=lambda c: -c["score"])
     assert (alt.skill_name, alt.min_proficiency) == ("Piloting", 5)
+
+
+def test_bench_order_follows_score_not_user_id(mission):
+    """Equal proficiency, unequal workload: the score must separate them.
+
+    Deliberately shaped so an id tie-break cannot fake it — the worse candidate has the
+    LOWER id, so ranking that fell through to `user_id` would invert this order.
+    """
+    piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
+    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=5)
+    crew_with(mission, {piloting: 9}, "Taken")  # wins the single open seat
+    busy = crew_with(mission, {piloting: 7}, "Busy")
+    fresh = crew_with(mission, {piloting: 7}, "Fresh")
+    busy_on(mission, busy, start=D(2026, 7, 1), end=D(2026, 8, 9))  # 40 days in-window
+    assert busy.id < fresh.id
+
+    alt = match_mission(mission).alternatives[0]
+    assert [c["name"] for c in alt.candidates] == ["Fresh", "Busy"]
+    assert [c["proficiency"] for c in alt.candidates] == [7, 7]
+    assert [c["score"] for c in alt.candidates] == [
+        round(2 / 9 + 0.5 * 1.0, 3),
+        round(2 / 9 + 0.5 * (1 - 40 / 90), 3),
+    ]
+    assert alt.candidates[0]["score"] > alt.candidates[1]["score"]
 
 
 def test_alternatives_exclude_the_underqualified_and_the_hard_blocked(mission):

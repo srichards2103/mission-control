@@ -101,7 +101,12 @@ def committed_assignments(
     qs = _hard_block_qs(
         start_date=start_date, end_date=end_date, exclude_mission_id=exclude_mission_id
     )
-    return qs.filter(user_id__in=user_ids).select_related("mission")
+    # Ordered so a public selector never hands back DB-dependent row order.
+    return (
+        qs.filter(user_id__in=user_ids)
+        .select_related("mission")
+        .order_by("mission__start_date", "id")
+    )
 
 
 def soft_conflicts_for_users(

@@ -49,9 +49,19 @@ PROFICIENCY_SPAN = 9
 #: How many bench candidates to offer per requirement.
 MAX_ALTERNATIVES = 3
 
+#: The closed set of diagnoses for a seat the matcher could not fill. Task 5.3 branches
+#: on these strings, so they are constants rather than literals at the point of use.
+#: They are mutually exclusive and tested in this order:
+#:   1. nobody on the roster qualifies at all;
+#:   2. qualified crew exist but every one of them is hard-blocked elsewhere;
+#:   3. crew are available but the mission is already at `max_crew` (`open_capacity == 0`);
+#:   4. otherwise — there is room and nobody is blocked, the roster is simply too thin.
+#: Reasons 3 and 4 are deliberately split: reporting "max_crew too small" alongside an
+#: `open_capacity` of 3 is a self-contradictory payload, and 5.3 renders both on one panel.
 NO_QUALIFIED_CREW = "no qualified crew"
 ALL_QUALIFIED_UNAVAILABLE = "all qualified crew unavailable"
 MAX_CREW_TOO_SMALL = "max_crew too small"
+NOT_ENOUGH_QUALIFIED_CREW = "not enough qualified crew"
 
 
 @dataclass
@@ -152,10 +162,18 @@ def match_mission(mission: Mission) -> MatchResult:
 
     # 2. The pool: active crew of this tenant, minus anyone hard-blocked elsewhere,
     #    minus anyone already proposed or accepted here (they are not a new proposal).
+    #
+    #    `user__is_active=True` mirrors `staffing._accepted_assignments_qs`, per the
+    #    human ruling that deactivated crew do not fill staffing seats. Without it a
+    #    member deactivated after being proposed would still consume a `max_crew` seat
+    #    and count toward `min_crew`, so the matcher would under-propose and hand back a
+    #    team the approve guard then rejects as short — with nothing explaining why.
+    #    Such a member is already absent from `roster` below, so freeing their seat here
+    #    cannot re-propose them; it only stops them holding a seat nobody can use.
     live_user_ids = set(
-        Assignment.objects.filter(mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES).values_list(
-            "user_id", flat=True
-        )
+        Assignment.objects.filter(
+            mission=mission, status__in=LIVE_ASSIGNMENT_STATUSES, user__is_active=True
+        ).values_list("user_id", flat=True)
     )
     capacity = max(mission.max_crew - len(live_user_ids), 0)
 
@@ -294,7 +312,9 @@ def match_mission(mission: Mission) -> MatchResult:
 
     # 6. Diagnose what is still open, so the UI can say *why* rather than just "short".
     #    Availability is judged against the hard blocks, not against who is left in the
-    #    pool: a candidate the matcher already seated elsewhere was available.
+    #    pool: a candidate the matcher already seated elsewhere was available. `capacity`
+    #    here is the final `open_capacity`, so "max_crew too small" is only ever reported
+    #    when the mission genuinely has no room left.
     unfilled: list[UnfilledSeat] = []
     for seat in open_seats:
         if seat.open_count <= 0:
@@ -306,8 +326,10 @@ def match_mission(mission: Mission) -> MatchResult:
             reason = NO_QUALIFIED_CREW
         elif qualified <= blocked_ids:
             reason = ALL_QUALIFIED_UNAVAILABLE
-        else:
+        elif capacity == 0:
             reason = MAX_CREW_TOO_SMALL
+        else:
+            reason = NOT_ENOUGH_QUALIFIED_CREW
         unfilled.extend(
             UnfilledSeat(seat.requirement_id, seat.skill_name, seat.min_proficiency, reason)
             for _ in range(seat.open_count)

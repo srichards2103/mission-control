@@ -739,3 +739,23 @@ def test_committed_assignments_is_one_query(tenant_ctx, django_assert_num_querie
         )
         # `select_related` means touching each mission adds no query.
         assert {a.mission.name for a in rows} == {f"Op {i}" for i in range(6)}
+
+
+def test_committed_assignments_is_ordered_deterministically(tenant_ctx):
+    """A public selector must not hand back DB-dependent row order."""
+    mission = tenant_ctx
+    member = UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant, name="Member")
+    for start, name in (
+        (D(2026, 9, 8), "Third"),
+        (D(2026, 9, 2), "First"),
+        (D(2026, 9, 5), "Second"),
+    ):
+        op = other_mission(
+            mission, status=MissionStatus.ACTIVE, start=start, end=start, name=name
+        )
+        AssignmentFactory(mission=op, user=member, status=AssignmentStatus.ACCEPTED)
+
+    rows = committed_assignments(
+        user_ids=[member.id], start_date=D(2026, 9, 1), end_date=D(2026, 9, 10)
+    )
+    assert [a.mission.name for a in rows] == ["First", "Second", "Third"]
