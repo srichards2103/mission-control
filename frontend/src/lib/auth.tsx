@@ -27,8 +27,17 @@ export function ProtectedRoute() {
   return <Outlet />;
 }
 
+// Invariant this component relies on: it must only be rendered under a resolved
+// ProtectedRoute (i.e. useUser() has already settled, successfully, higher up the
+// tree). Without the isLoading guard below, hasPermission(undefined, perm) is false
+// while the query is still in flight, which would bounce a permitted user to "/" for
+// the split second before `user` loads -- every current usage happens to be safely
+// nested under ProtectedRoute, but nothing enforces that for a future standalone use
+// (e.g. inside a modal, or a route outside that tree). Guard it here so this component
+// is safe on its own rather than merely safe by convention.
 export function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
-  const { data: user } = useUser();
+  const { data: user, isLoading } = useUser();
+  if (isLoading) return null;
   if (!hasPermission(user, permission)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }
