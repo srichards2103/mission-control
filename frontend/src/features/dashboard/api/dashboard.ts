@@ -65,6 +65,11 @@ const UtilizationSchema = z.object({
 const SkillGapSchema = z.object({
   skill_id: z.number(),
   skill_name: z.string(),
+  // Rows are now grouped by (skill_id, min_proficiency) rather than collapsed with
+  // Min(), so the same skill can legitimately appear more than once (e.g. one open
+  // mission needs Geology >=5, another needs it >=4) -- skill_id alone is no longer a
+  // unique key for this list.
+  min_proficiency: z.number(),
   open_seats: z.number(),
   qualified_crew: z.number(),
   gap: z.boolean(),

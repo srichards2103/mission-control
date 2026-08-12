@@ -90,9 +90,14 @@ export const dashboardFixture = {
       { user_id: 3, name: "Sam Okafor", assigned_days: 10, utilization_pct: 11 },
     ],
   },
+  // Two rows share skill_id 1 ("Piloting") at different min_proficiency thresholds --
+  // rows are grouped by (skill_id, min_proficiency), not skill alone, so the same
+  // skill can legitimately appear more than once. Exercises the dashboard page's
+  // composite row key and the threshold-in-label rendering.
   skill_gaps: [
-    { skill_id: 1, skill_name: "Piloting", open_seats: 3, qualified_crew: 1, gap: true },
-    { skill_id: 2, skill_name: "Navigation", open_seats: 1, qualified_crew: 4, gap: false },
+    { skill_id: 1, skill_name: "Piloting", min_proficiency: 7, open_seats: 3, qualified_crew: 1, gap: true },
+    { skill_id: 1, skill_name: "Piloting", min_proficiency: 3, open_seats: 1, qualified_crew: 4, gap: false },
+    { skill_id: 2, skill_name: "Navigation", min_proficiency: 5, open_seats: 1, qualified_crew: 4, gap: false },
   ],
 };
 

@@ -15,6 +15,7 @@ function CoverageBar({ pct }: { pct: number }) {
       aria-valuenow={clamped}
       aria-valuemin={0}
       aria-valuemax={100}
+      aria-label="Seats filled"
       className="h-2 w-full overflow-hidden rounded-full bg-muted"
     >
       <div
@@ -63,7 +64,11 @@ export function DashboardPage() {
   const { data, isLoading, isError } = useDashboard();
 
   if (isLoading) {
-    return <p className="text-sm text-muted-foreground">Loading dashboard…</p>;
+    return (
+      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+        Loading dashboard…
+      </p>
+    );
   }
   if (isError || !data) {
     return (
@@ -215,8 +220,13 @@ export function DashboardPage() {
                 </TableHeader>
                 <TableBody>
                   {gapsFirst.map((row) => (
-                    <TableRow key={row.skill_id} className={cn(row.gap && "bg-destructive/5")}>
-                      <TableCell>{row.skill_name}</TableCell>
+                    <TableRow
+                      key={`${row.skill_id}:${row.min_proficiency}`}
+                      className={cn(row.gap && "bg-destructive/5")}
+                    >
+                      <TableCell>
+                        {row.skill_name} &ge;{row.min_proficiency}
+                      </TableCell>
                       <TableCell>{row.open_seats}</TableCell>
                       <TableCell>{row.qualified_crew}</TableCell>
                       <TableCell>

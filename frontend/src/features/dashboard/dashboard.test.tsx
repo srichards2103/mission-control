@@ -22,8 +22,16 @@ describe("dashboard page", () => {
     expect(await screen.findByText("Ganymede Survey")).toBeInTheDocument();
     expect(screen.getByText(/at risk/i)).toBeInTheDocument();
     expect(screen.getByText("42%")).toBeInTheDocument();
-    expect(screen.getByText("Piloting")).toBeInTheDocument();
     expect(screen.getByText(/^gap$/i)).toBeInTheDocument();
+  });
+
+  it("renders two skill-gap rows for the same skill at different thresholds as distinguishable rows", async () => {
+    renderAt("/");
+
+    // Composite (skill_id, min_proficiency) key: both rows render, each labelled with
+    // its own threshold, rather than one clobbering the other under a skill-only key.
+    expect(await screen.findByText("Piloting ≥7")).toBeInTheDocument();
+    expect(screen.getByText("Piloting ≥3")).toBeInTheDocument();
   });
 
   it("shows an error state when the dashboard fails to load", async () => {
