@@ -307,28 +307,42 @@ def test_soft_conflicts_empty_user_list(tenant_ctx):
 
 
 def test_soft_conflicts_is_one_query_for_many_users(tenant_ctx, django_assert_num_queries):
+    """Measured at two sizes: one measurement cannot tell "constant" apart from
+    "coincidentally right at this N".
+    """
     mission = tenant_ctx
     users = []
-    for i in range(5):
-        other = other_mission(
-            mission,
-            status=MissionStatus.DRAFT,
-            start=D(2026, 9, 2),
-            end=D(2026, 9, 3),
-            name=f"D{i}",
-        )
-        users.append(AssignmentFactory(mission=other, status=AssignmentStatus.PROPOSED).user_id)
-    with django_assert_num_queries(1):
-        conflicts = soft_conflicts_for_users(
-            user_ids=users,
-            start_date=mission.start_date,
-            end_date=mission.end_date,
-            exclude_mission_id=mission.id,
-        )
-        for entries in conflicts.values():
-            for entry in entries:
-                entry["mission_name"]  # names come from the join, not lazy loads
-    assert len(conflicts) == 5
+
+    def add_conflicted_users(n):
+        for i in range(n):
+            other = other_mission(
+                mission,
+                status=MissionStatus.DRAFT,
+                start=D(2026, 9, 2),
+                end=D(2026, 9, 3),
+                name=f"D{len(users)}-{i}",
+            )
+            users.append(
+                AssignmentFactory(mission=other, status=AssignmentStatus.PROPOSED).user_id
+            )
+
+    def measure():
+        with django_assert_num_queries(1):
+            conflicts = soft_conflicts_for_users(
+                user_ids=users,
+                start_date=mission.start_date,
+                end_date=mission.end_date,
+                exclude_mission_id=mission.id,
+            )
+            for entries in conflicts.values():
+                for entry in entries:
+                    entry["mission_name"]  # names come from the join, not lazy loads
+        assert len(conflicts) == len(users)
+
+    add_conflicted_users(3)
+    measure()
+    add_conflicted_users(15)
+    measure()
 
 
 # ----------------------------------------------------------------------------- coverage
@@ -444,24 +458,46 @@ def test_mission_with_no_requirements_is_fully_covered(tenant_ctx):
 
 
 def test_coverage_query_count_is_constant(tenant_ctx, django_assert_num_queries):
+    """Three queries at two very different shapes -- see the docstring on the soft
+    conflicts test for why one size is not enough.
+    """
     mission = tenant_ctx
-    skills = [SkillFactory(tenant=mission.tenant, name=f"Skill {i}") for i in range(3)]
-    for skill in skills:
-        MissionRequirementFactory(
-            mission=mission, skill=skill, min_proficiency=3, required_count=2
-        )
-        MissionRequirementFactory(
-            mission=mission, skill=skill, min_proficiency=8, required_count=1
-        )
-    for i in range(6):
-        user = crew_with(mission, skills[i % 3], 9, name=f"Crew {i}")
-        CrewSkillFactory(user=user, skill=skills[(i + 1) % 3], proficiency=4)
-        AssignmentFactory(mission=mission, user=user, status=AssignmentStatus.ACCEPTED)
-    with django_assert_num_queries(3):
-        report = mission_coverage(mission)
-        for row in report.requirements:
-            row.skill_name, [f["name"] for f in row.filled_by]
-    assert report.accepted_count == 6
+    skills = []
+    crew_count = 0
+
+    def grow(n_skills, n_crew):
+        nonlocal crew_count
+        first = len(skills)
+        for i in range(n_skills):
+            skill = SkillFactory(tenant=mission.tenant, name=f"Skill {first + i}")
+            skills.append(skill)
+            MissionRequirementFactory(
+                mission=mission, skill=skill, min_proficiency=3, required_count=2
+            )
+            MissionRequirementFactory(
+                mission=mission, skill=skill, min_proficiency=8, required_count=1
+            )
+        for _ in range(n_crew):
+            user = crew_with(
+                mission, skills[crew_count % len(skills)], 9, name=f"Crew {crew_count}"
+            )
+            CrewSkillFactory(
+                user=user, skill=skills[(crew_count + 1) % len(skills)], proficiency=4
+            )
+            AssignmentFactory(mission=mission, user=user, status=AssignmentStatus.ACCEPTED)
+            crew_count += 1
+
+    def measure():
+        with django_assert_num_queries(3):
+            report = mission_coverage(mission)
+            for row in report.requirements:
+                row.skill_name, [f["name"] for f in row.filled_by]
+        assert report.accepted_count == crew_count
+
+    grow(2, 3)
+    measure()
+    grow(6, 15)
+    measure()
 
 
 # --------------------------------------------------------------------- validation errors
@@ -539,10 +575,10 @@ def test_validation_errors_hard_block_lookup_is_not_per_member(
     tenant_ctx, django_assert_num_queries
 ):
     mission = tenant_ctx
-    mission.max_crew = 5
-    mission.save()
     piloting = SkillFactory(tenant=mission.tenant, name="Piloting")
-    MissionRequirementFactory(mission=mission, skill=piloting, min_proficiency=1, required_count=4)
+    requirement = MissionRequirementFactory(
+        mission=mission, skill=piloting, min_proficiency=1, required_count=1
+    )
     elsewhere = other_mission(
         mission,
         status=MissionStatus.ACTIVE,
@@ -550,13 +586,33 @@ def test_validation_errors_hard_block_lookup_is_not_per_member(
         end=D(2026, 9, 20),
         name="Busy Op",
     )
-    for i in range(4):
-        user = crew_with(mission, piloting, 5, name=f"Crew {i}")
-        AssignmentFactory(mission=mission, user=user, status=AssignmentStatus.ACCEPTED)
-        AssignmentFactory(mission=elsewhere, user=user, status=AssignmentStatus.ACCEPTED)
-    with django_assert_num_queries(4):  # 3 for coverage + 1 for the hard-block join
-        errors = staffing_validation_errors(mission)
-    assert len([e for e in errors if "committed to 'Busy Op'" in e]) == 4
+    members = 0
+
+    def add_members(n):
+        nonlocal members
+        for _ in range(n):
+            user = crew_with(mission, piloting, 5, name=f"Crew {members}")
+            AssignmentFactory(mission=mission, user=user, status=AssignmentStatus.ACCEPTED)
+            AssignmentFactory(mission=elsewhere, user=user, status=AssignmentStatus.ACCEPTED)
+            members += 1
+        # Keep the mission's own bounds satisfied so the only errors are the conflicts.
+        mission.max_crew = members
+        mission.save()
+        requirement.required_count = members
+        requirement.save()
+
+    def measure():
+        # Two data sizes: one measurement cannot distinguish a constant query count from
+        # one that happens to be right at that N.
+        with django_assert_num_queries(4):  # 3 for coverage + 1 for the hard-block join
+            errors = staffing_validation_errors(mission)
+        assert len([e for e in errors if "committed to 'Busy Op'" in e]) == members
+        assert len(errors) == members
+
+    add_members(2)
+    measure()
+    add_members(10)
+    measure()
 
 
 # ------------------------------------------------------------------------- deactivation
@@ -719,26 +775,39 @@ def test_committed_assignments_honours_the_window_and_the_exclusion(tenant_ctx):
 
 
 def test_committed_assignments_is_one_query(tenant_ctx, django_assert_num_queries):
+    """One query at two sizes -- see the soft-conflicts test for why one is not enough."""
     mission = tenant_ctx
-    members = [
-        UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant, name=f"M{i}") for i in range(6)
-    ]
-    for i, member in enumerate(members):
-        op = other_mission(
-            mission,
-            status=MissionStatus.ACTIVE,
-            start=D(2026, 9, 2),
-            end=D(2026, 9, 8),
-            name=f"Op {i}",
-        )
-        AssignmentFactory(mission=op, user=member, status=AssignmentStatus.ACCEPTED)
+    members = []
 
-    with django_assert_num_queries(1):
-        rows = committed_assignments(
-            user_ids=[m.id for m in members], start_date=D(2026, 9, 1), end_date=D(2026, 9, 10)
-        )
-        # `select_related` means touching each mission adds no query.
-        assert {a.mission.name for a in rows} == {f"Op {i}" for i in range(6)}
+    def add_committed_members(n):
+        for _ in range(n):
+            member = UserFactory(
+                role=Role.CREW_MEMBER, tenant=mission.tenant, name=f"M{len(members)}"
+            )
+            op = other_mission(
+                mission,
+                status=MissionStatus.ACTIVE,
+                start=D(2026, 9, 2),
+                end=D(2026, 9, 8),
+                name=f"Op {len(members)}",
+            )
+            AssignmentFactory(mission=op, user=member, status=AssignmentStatus.ACCEPTED)
+            members.append(member)
+
+    def measure():
+        with django_assert_num_queries(1):
+            rows = committed_assignments(
+                user_ids=[m.id for m in members],
+                start_date=D(2026, 9, 1),
+                end_date=D(2026, 9, 10),
+            )
+            # `select_related` means touching each mission adds no query.
+            assert {a.mission.name for a in rows} == {f"Op {i}" for i in range(len(members))}
+
+    add_committed_members(3)
+    measure()
+    add_committed_members(15)
+    measure()
 
 
 def test_committed_assignments_is_ordered_deterministically(tenant_ctx):
