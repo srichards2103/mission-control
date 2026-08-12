@@ -73,7 +73,7 @@ export function useStaffing(missionId: number) {
   });
 }
 
-function invalidateStaffing(qc: ReturnType<typeof useQueryClient>, missionId: number) {
+export function invalidateStaffing(qc: ReturnType<typeof useQueryClient>, missionId: number) {
   qc.invalidateQueries({ queryKey: staffingKey(missionId) });
   qc.invalidateQueries({ queryKey: ["missions", missionId] });
 }
@@ -150,6 +150,15 @@ export function useRespondAssignment() {
         (await api.post(`/assignments/${assignmentId}/respond/`, reason ? { action, reason } : { action }))
           .data,
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: MY_ASSIGNMENTS_KEY }),
+    // Accepting/declining changes accepted_count, fully_covered, and the roster
+    // entry's status -- exactly the staffing data propose/remove already invalidate
+    // via invalidateStaffing(). Without this, a staffing panel and my-assignments
+    // page co-mounted on one screen (or either query given a non-zero staleTime)
+    // would show stale staffing after a respond. The response body carries the
+    // mission id needed to invalidate it.
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: MY_ASSIGNMENTS_KEY });
+      invalidateStaffing(qc, data.mission.id);
+    },
   });
 }
