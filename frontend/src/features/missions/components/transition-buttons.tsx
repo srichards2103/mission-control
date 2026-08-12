@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTransitionMission, type MissionDetail, type MissionStatus } from "@/features/missions/api/missions";
+import { TERMINAL_MISSION_STATUSES } from "@/features/missions/components/mission-status-badge";
 import { errorMessage } from "@/lib/api-errors";
 import { hasPermission, useUser } from "@/lib/auth";
 
@@ -34,8 +35,6 @@ const ACTIONS_BY_STATUS: Record<MissionStatus, ActionDef[]> = {
   completed: [],
   cancelled: [],
 };
-
-const TERMINAL_STATUSES: MissionStatus[] = ["completed", "cancelled"];
 
 type ReasonDialogState = { action: "reject" | "cancel"; reason: string } | null;
 
@@ -62,7 +61,8 @@ export function TransitionButtons({ mission }: { mission: MissionDetail }) {
     if ((def.action === "approve" || def.action === "reject") && isCreator) return false;
     return true;
   });
-  const canCancel = !TERMINAL_STATUSES.includes(mission.status) && hasPermission(user, "mission.progress");
+  const canCancel =
+    !TERMINAL_MISSION_STATUSES.includes(mission.status) && hasPermission(user, "mission.progress");
 
   if (actions.length === 0 && !canCancel) return null;
 

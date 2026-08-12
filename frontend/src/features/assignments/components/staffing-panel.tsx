@@ -6,17 +6,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useRemoveAssignment, useStaffing } from "@/features/assignments/api/assignments";
 import { AddCrewDialog } from "@/features/assignments/components/add-crew-dialog";
 import { MatchDialog } from "@/features/matching/components/match-dialog";
-import { useMission, type MissionStatus } from "@/features/missions/api/missions";
+import { useMission } from "@/features/missions/api/missions";
+import { TERMINAL_MISSION_STATUSES } from "@/features/missions/components/mission-status-badge";
 import { errorMessage } from "@/lib/api-errors";
 import { hasPermission, useUser } from "@/lib/auth";
-
-// Mirrors transition-buttons.tsx's TERMINAL_STATUSES -- duplicated rather than
-// imported because that constant isn't exported, and this is the only other place
-// that needs "is this mission over" as a plain gate (not the FSM's full transition
-// table). Auto-matching a completed/cancelled mission is refused server-side with a
-// 400 ("Cannot match a completed or cancelled mission."), so this only avoids
-// showing a button that would always fail.
-const TERMINAL_STATUSES: MissionStatus[] = ["completed", "cancelled"];
 
 export function StaffingPanel({ missionId }: { missionId: number }) {
   const { data: user } = useUser();
@@ -35,7 +28,8 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
   // rows apart).
   const [removingId, setRemovingId] = useState<number | null>(null);
   const canManage = hasPermission(user, "assignment.manage");
-  const canMatch = hasPermission(user, "match.run") && !!mission && !TERMINAL_STATUSES.includes(mission.status);
+  const canMatch =
+    hasPermission(user, "match.run") && !!mission && !TERMINAL_MISSION_STATUSES.includes(mission.status);
 
   // isLoading -> isError -> data, in that order (see mission-detail-page.tsx and
   // others): data?.map must never run before both checks.

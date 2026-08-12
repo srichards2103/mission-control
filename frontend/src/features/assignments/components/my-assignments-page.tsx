@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useMyAssignments, useRespondAssignment, type MyAssignment } from "@/features/assignments/api/assignments";
+import { TERMINAL_MISSION_STATUSES } from "@/features/missions/components/mission-status-badge";
 import { errorMessage } from "@/lib/api-errors";
 
 const ASSIGNMENT_STATUS_LABELS: Record<MyAssignment["status"], string> = {
@@ -23,12 +24,8 @@ const ASSIGNMENT_STATUS_LABELS: Record<MyAssignment["status"], string> = {
   removed: "Removed",
 };
 
-// Mission statuses past which an accepted assignment is no longer "upcoming" work --
-// mirrors MISSION_STATUSES in features/missions/api/missions.ts.
-const TERMINAL_MISSION_STATUSES = new Set(["completed", "cancelled"]);
-
 function isUpcoming(assignment: MyAssignment): boolean {
-  return assignment.status === "accepted" && !TERMINAL_MISSION_STATUSES.has(assignment.mission.status);
+  return assignment.status === "accepted" && !TERMINAL_MISSION_STATUSES.includes(assignment.mission.status);
 }
 
 function MissionDates({ assignment }: { assignment: MyAssignment }) {

@@ -12,6 +12,12 @@ export const MISSION_STATUS_LABELS: Record<MissionStatus, string> = {
   cancelled: "Cancelled",
 };
 
+// The FSM's two terminal statuses -- no further transition is possible from either.
+// Single canonical definition; previously duplicated in transition-buttons.tsx,
+// staffing-panel.tsx, and my-assignments-page.tsx (the last as a differently-named
+// Set). Import this rather than re-declaring it a fourth time.
+export const TERMINAL_MISSION_STATUSES: readonly MissionStatus[] = ["completed", "cancelled"];
+
 // Badge has no amber/blue/green variant, so those three statuses reuse the
 // "outline" variant and layer color utility classes on top.
 const STATUS_STYLES: Record<
