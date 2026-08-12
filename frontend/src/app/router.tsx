@@ -9,12 +9,15 @@ import { CrewDetailPage } from "@/features/crew/components/crew-detail-page";
 import { MissionsPage } from "@/features/missions/components/missions-page";
 import { MissionDetailPage } from "@/features/missions/components/mission-detail-page";
 import { MyAssignmentsPage } from "@/features/assignments/components/my-assignments-page";
+import { DashboardPage } from "@/features/dashboard/components/dashboard-page";
 
 function HomeRedirect() {
   const { data: user } = useUser();
   if (!user) return null;
+  // A user without dashboard.view (crew) lands on their own assignments instead --
+  // there is nothing else at "/" for them to see.
   if (!hasPermission(user, "dashboard.view")) return <Navigate to="/my-assignments" replace />;
-  return <h1 className="text-xl font-semibold">Dashboard</h1>; // replaced in Stage 6
+  return <DashboardPage />;
 }
 
 const routes = [

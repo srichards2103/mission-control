@@ -39,6 +39,63 @@ function initialMySkills() {
 }
 let mySkills = initialMySkills();
 
+// Static dashboard fixture (GET /api/v1/dashboard/) -- nothing in this feature writes
+// to it, so unlike skills/missions/staffing/myAssignments above it needs no mutable
+// backing store or resetMockData() entry.
+export const dashboardFixture = {
+  pipeline: {
+    status_counts: {
+      draft: 1,
+      pending_approval: 1,
+      approved: 1,
+      rejected: 0,
+      active: 1,
+      completed: 0,
+      cancelled: 0,
+    },
+    pending_approvals: [
+      { mission_id: 20, name: "Titan Cartography", submitted_at: "2026-08-10T12:00:00Z", age_days: 2 },
+    ],
+    upcoming: [{ mission_id: 21, name: "Europa Drill", start_date: "2026-08-20", days_until: 8 }],
+  },
+  readiness: [
+    {
+      mission_id: 22,
+      name: "Ganymede Survey",
+      status: "approved",
+      start_date: "2026-09-01",
+      coverage_pct: 33,
+      accepted_count: 1,
+      min_crew: 3,
+      fully_covered: false,
+      at_risk: true,
+    },
+    {
+      mission_id: 23,
+      name: "Callisto Relay",
+      status: "active",
+      start_date: "2026-08-15",
+      coverage_pct: 100,
+      accepted_count: 4,
+      min_crew: 4,
+      fully_covered: true,
+      at_risk: false,
+    },
+  ],
+  utilization: {
+    window_days: 90,
+    org_utilization_pct: 42,
+    crew: [
+      { user_id: 2, name: "Priya Nair", assigned_days: 60, utilization_pct: 67 },
+      { user_id: 3, name: "Sam Okafor", assigned_days: 10, utilization_pct: 11 },
+    ],
+  },
+  skill_gaps: [
+    { skill_id: 1, skill_name: "Piloting", open_seats: 3, qualified_crew: 1, gap: true },
+    { skill_id: 2, skill_name: "Navigation", open_seats: 1, qualified_crew: 4, gap: false },
+  ],
+};
+
 export const missionFixture = {
   id: 10,
   name: "Ganymede Survey",
@@ -188,6 +245,7 @@ export function resetMockData() {
 export const server = setupServer(
   http.post("/api/v1/auth/token/", () => HttpResponse.json({ access: "a", refresh: "r" })),
   http.get("/api/v1/auth/me/", () => HttpResponse.json(leadUser)),
+  http.get("/api/v1/dashboard/", () => HttpResponse.json(dashboardFixture)),
   http.get("/api/v1/skills/", () =>
     HttpResponse.json({ results: skills, count: skills.length, limit: 25, offset: 0 })),
   http.post("/api/v1/skills/", async ({ request }) => {

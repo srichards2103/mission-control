@@ -7,6 +7,7 @@ from mission_control.missions.apis.assignments import (
     MissionStaffingApi,
     MyAssignmentsApi,
 )
+from mission_control.missions.apis.dashboard import DashboardApi
 from mission_control.missions.apis.matching import MissionMatchApi
 from mission_control.missions.apis.missions import (
     MissionDetailApi,
@@ -16,6 +17,7 @@ from mission_control.missions.apis.missions import (
 )
 
 urlpatterns = [
+    path("dashboard/", DashboardApi.as_view()),
     path("missions/", MissionListCreateApi.as_view()),
     path("missions/<int:mission_id>/", MissionDetailApi.as_view()),
     path("missions/<int:mission_id>/requirements/", MissionRequirementsApi.as_view()),
