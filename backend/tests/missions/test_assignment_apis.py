@@ -1,7 +1,9 @@
 import datetime as dt
+from unittest.mock import patch
 
 import pytest
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 
 from mission_control.missions.factories import AssignmentFactory, MissionFactory
 from mission_control.missions.models import Assignment, AssignmentStatus, MissionStatus
@@ -249,3 +251,117 @@ def test_staffing_roster_reflects_soft_conflict_and_hard_block(auth_client_for):
     assert roster_row["hard_blocked"] is False
     assert len(roster_row["soft_conflicts"]) == 1
     assert roster_row["soft_conflicts"][0]["mission_id"] == soft_mission.id
+
+
+# --------------------------------------------------------------------------- fix-round coverage
+# Added after code review: the concurrent-duplicate race (Important finding) plus cheap gaps
+# (non-crew role rejection, re-propose after decline, terminal-mission guards on both propose
+# and respond, and a cross-tenant 404 for the remove endpoint).
+
+
+def test_propose_concurrent_duplicate_returns_400_not_500(auth_client_for):
+    """A genuinely concurrent duplicate proposal must still be a clean 400, not a 500.
+
+    The `already` pre-check and `full_clean()`'s `validate_constraints()` are both
+    non-locking SELECTs, so two racing proposals for the same (mission, user) can both
+    pass them before either commits -- the second INSERT then hits the partial
+    `assignment_live_uniq` index and raises `IntegrityError`. Simulated deterministically
+    (rather than by timing) by making the first `Assignment.save()` call raise the same
+    `IntegrityError` Postgres would raise, standing in for "a concurrent request just
+    committed between our checks and our insert".
+    """
+    lead, mission = make_lead_mission()
+    crew = UserFactory(role=Role.CREW_MEMBER, tenant=lead.tenant)
+    url = f"/api/v1/missions/{mission.id}/assignments/"
+
+    original_save = Assignment.save
+
+    def flaky_save(self, *args, **kwargs):
+        raise IntegrityError(
+            'duplicate key value violates unique constraint "assignment_live_uniq"'
+        )
+
+    with patch.object(Assignment, "save", flaky_save):
+        resp = auth_client_for(lead).post(url, {"user_ids": [crew.id]}, format="json")
+
+    assert resp.status_code == 400
+    assert resp.data["message"] != ""
+    assert "extra" in resp.data
+    # The transaction/savepoint handling must leave the DB clean -- no half-written row.
+    assert Assignment.objects_unscoped.filter(mission=mission, user=crew).count() == 0
+
+    # And a normal (non-racing) retry afterwards succeeds -- the failed attempt didn't
+    # poison the outer transaction or leave the mission unstaffable.
+    with patch.object(Assignment, "save", original_save):
+        retry = auth_client_for(lead).post(url, {"user_ids": [crew.id]}, format="json")
+    assert retry.status_code == 201
+    assert Assignment.objects_unscoped.filter(
+        mission=mission, user=crew, status="proposed"
+    ).count() == 1
+
+
+def test_propose_non_crew_role_rejected(auth_client_for):
+    """Only CREW_MEMBERs are assignable -- a lead or director id must be rejected too,
+    not just the is_active=False half of the guard."""
+    lead, mission = make_lead_mission()
+    other_lead = UserFactory(role=Role.MISSION_LEAD, tenant=lead.tenant)
+    resp = auth_client_for(lead).post(
+        f"/api/v1/missions/{mission.id}/assignments/",
+        {"user_ids": [other_lead.id]}, format="json",
+    )
+    assert resp.status_code == 400
+
+
+def test_reproposing_after_decline_is_allowed_via_api(auth_client_for):
+    """The partial `assignment_live_uniq` constraint only covers proposed/accepted, so a
+    declined assignment (not just a removed one) must not block re-proposal."""
+    lead, mission = make_lead_mission()
+    crew = UserFactory(role=Role.CREW_MEMBER, tenant=lead.tenant)
+    lead_client = auth_client_for(lead)
+    url = f"/api/v1/missions/{mission.id}/assignments/"
+
+    resp = lead_client.post(url, {"user_ids": [crew.id]}, format="json")
+    assert resp.status_code == 201
+    assignment = Assignment.objects_unscoped.get(mission=mission, user=crew)
+
+    decline_resp = auth_client_for(crew).post(
+        f"/api/v1/assignments/{assignment.id}/respond/", {"action": "decline"}
+    )
+    assert decline_resp.status_code == 200 and decline_resp.data["status"] == "declined"
+
+    resp = lead_client.post(url, {"user_ids": [crew.id]}, format="json")
+    assert resp.status_code == 201
+    assert Assignment.objects_unscoped.filter(
+        mission=mission, user=crew, status="proposed"
+    ).count() == 1
+
+
+@pytest.mark.parametrize("terminal_status", [MissionStatus.COMPLETED, MissionStatus.CANCELLED])
+def test_propose_on_terminal_mission_rejected(auth_client_for, terminal_status):
+    lead, mission = make_lead_mission()
+    mission.status = terminal_status
+    mission.save(update_fields=["status"])
+    crew = UserFactory(role=Role.CREW_MEMBER, tenant=lead.tenant)
+    resp = auth_client_for(lead).post(
+        f"/api/v1/missions/{mission.id}/assignments/", {"user_ids": [crew.id]}, format="json"
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.parametrize("terminal_status", [MissionStatus.COMPLETED, MissionStatus.CANCELLED])
+def test_respond_on_terminal_mission_rejected(auth_client_for, terminal_status):
+    lead, mission = make_lead_mission()
+    assignment = AssignmentFactory(mission=mission, created_by=lead)
+    mission.status = terminal_status
+    mission.save(update_fields=["status"])
+    resp = auth_client_for(assignment.user).post(
+        f"/api/v1/assignments/{assignment.id}/respond/", {"action": "accept"}
+    )
+    assert resp.status_code == 400
+
+
+def test_cross_tenant_assignment_remove_404(auth_client_for):
+    lead = UserFactory(role=Role.MISSION_LEAD)
+    other = AssignmentFactory()  # different tenant
+    resp = auth_client_for(lead).post(f"/api/v1/assignments/{other.id}/remove/")
+    assert resp.status_code == 404

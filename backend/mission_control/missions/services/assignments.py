@@ -5,7 +5,7 @@ Task 4.2's selectors in `missions.selectors.staffing` -- this module never re-de
 date-overlap or status predicate itself; see `hard_blocked_user_ids` below.
 """
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied
 
@@ -79,12 +79,32 @@ def assignments_propose(*, actor, mission: Mission, user_ids: list[int]) -> list
     created = []
     for user in users:
         assignment = Assignment(tenant_id=tenant_id, mission=mission, user=user, created_by=actor)
-        # full_clean() (not bulk_create, which skips validation) so the partial
-        # `assignment_live_uniq` constraint surfaces as a clean 400 validation envelope
-        # -- via Django's validate_constraints() -- rather than an IntegrityError 500,
-        # even though the `already` check above rules this out in the ordinary case.
-        assignment.full_clean()
-        assignment.save()
+        try:
+            # A savepoint, not the outer atomic block itself: if the INSERT below
+            # hits the partial `assignment_live_uniq` index, Postgres aborts the
+            # current transaction until it is rolled back to *something* -- without
+            # this inner `atomic()`, that would poison the outer @transaction.atomic
+            # and turn every subsequent statement (including any later user in this
+            # same loop) into an `InTransaction` error too.
+            with transaction.atomic():
+                # full_clean() (not bulk_create, which skips validation) so the
+                # ordinary case -- no concurrent writer -- surfaces the partial
+                # `assignment_live_uniq` constraint as a clean 400 validation
+                # envelope via Django's validate_constraints(), not an
+                # IntegrityError 500.
+                assignment.full_clean()
+                assignment.save()
+        except IntegrityError:
+            # Both the `already` pre-check above and full_clean()'s
+            # validate_constraints() are non-locking SELECTs, so a genuinely
+            # concurrent proposal for this same (mission, user) -- a double-click,
+            # a client retry -- can still slip past both and lose the race at the
+            # INSERT itself. Convert that DB-level partial-unique violation into
+            # the same ApplicationError (400) the sequential path produces, rather
+            # than letting a raw IntegrityError fall through to an unhandled 500.
+            raise ApplicationError(
+                f"{user.name} was just assigned to this mission by someone else."
+            ) from None
         created.append(assignment)
     return created
 
