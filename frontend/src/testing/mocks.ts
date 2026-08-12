@@ -21,7 +21,18 @@ export const directorUser = {
   ],
 };
 
-const skills = [{ id: 1, name: "Piloting", description: "", is_archived: false }];
+// Mutable mock data for handlers below (e.g. the skills POST handler appends to this
+// array). server.resetHandlers() only resets handler *overrides* added via server.use(),
+// not data mutated by a still-registered base handler — so this must be reseeded
+// explicitly between tests. See resetMockData(), wired into afterEach in setup.ts.
+function initialSkills() {
+  return [{ id: 1, name: "Piloting", description: "", is_archived: false }];
+}
+let skills = initialSkills();
+
+export function resetMockData() {
+  skills = initialSkills();
+}
 
 export const server = setupServer(
   http.post("/api/v1/auth/token/", () => HttpResponse.json({ access: "a", refresh: "r" })),

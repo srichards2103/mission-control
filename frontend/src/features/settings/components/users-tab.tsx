@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { AxiosError } from "axios";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCreateUser, useOrgUsers, useUpdateUser, type OrgUser } from "@/features/settings/api/settings";
+import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
 
 const ROLES: { value: OrgUser["role"]; label: string }[] = [
   { value: "director", label: "Director" },
@@ -26,21 +26,6 @@ const ROLES: { value: OrgUser["role"]; label: string }[] = [
 
 function roleLabel(role: string): string {
   return ROLES.find((r) => r.value === role)?.label ?? role;
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof AxiosError && typeof err.response?.data?.message === "string") {
-    return err.response.data.message;
-  }
-  return "Something went wrong. Please try again.";
-}
-
-function fieldErrorsFrom(err: unknown): Record<string, string[]> {
-  if (err instanceof AxiosError) {
-    const fields = err.response?.data?.extra?.fields;
-    if (fields && typeof fields === "object") return fields;
-  }
-  return {};
 }
 
 function AddUserDialog() {
@@ -170,10 +155,17 @@ function RoleSelect({ user }: { user: OrgUser }) {
 }
 
 export function UsersTab() {
-  const { data: users, isLoading } = useOrgUsers();
+  const { data: users, isLoading, isError } = useOrgUsers();
   const updateUser = useUpdateUser();
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading users…</p>;
+  if (isError) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        Couldn&apos;t load users. Please try again.
+      </p>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">

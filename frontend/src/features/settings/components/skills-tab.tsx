@@ -1,21 +1,14 @@
 import { useState } from "react";
-import { AxiosError } from "axios";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCreateSkill, useSkills, useUpdateSkill } from "@/features/skills/api/skills";
-
-function errorMessage(err: unknown): string {
-  if (err instanceof AxiosError && typeof err.response?.data?.message === "string") {
-    return err.response.data.message;
-  }
-  return "Something went wrong. Please try again.";
-}
+import { errorMessage } from "@/lib/api-errors";
 
 export function SkillsTab() {
-  const { data: skills, isLoading } = useSkills();
+  const { data: skills, isLoading, isError } = useSkills();
   const createSkill = useCreateSkill();
   const updateSkill = useUpdateSkill();
   const [name, setName] = useState("");
@@ -40,6 +33,13 @@ export function SkillsTab() {
   }
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading skills…</p>;
+  if (isError) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        Couldn&apos;t load skills. Please try again.
+      </p>
+    );
+  }
 
   return (
     <Table>

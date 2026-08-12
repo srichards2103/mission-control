@@ -1,26 +1,24 @@
 import { useState } from "react";
-import { AxiosError } from "axios";
 import { PencilIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useOrganisation, useUpdateOrganisation } from "@/features/settings/api/settings";
-
-function errorMessage(err: unknown): string {
-  if (err instanceof AxiosError && typeof err.response?.data?.message === "string") {
-    return err.response.data.message;
-  }
-  return "Something went wrong. Please try again.";
-}
+import { errorMessage } from "@/lib/api-errors";
 
 export function OrganisationTab() {
-  const { data: organisation, isLoading } = useOrganisation();
+  const { data: organisation, isLoading, isError } = useOrganisation();
   const updateOrganisation = useUpdateOrganisation();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
 
-  if (isLoading || !organisation) {
-    return <p className="text-sm text-muted-foreground">Loading organisation…</p>;
+  if (isLoading) return <p className="text-sm text-muted-foreground">Loading organisation…</p>;
+  if (isError || !organisation) {
+    return (
+      <p role="alert" className="text-sm text-destructive">
+        Couldn&apos;t load the organisation. Please try again.
+      </p>
+    );
   }
 
   function startEditing() {
