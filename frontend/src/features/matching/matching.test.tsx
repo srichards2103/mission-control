@@ -195,6 +195,47 @@ describe("matcher dialog", () => {
     expect(posted).toEqual({ user_ids: [4, 6] });
   });
 
+  it("re-checking a swapped-out member reverts the swap instead of double-covering the seat", async () => {
+    server.use(http.post("/api/v1/missions/10/match/", () => HttpResponse.json(twoMemberMatch)));
+    let posted: unknown = null;
+    server.use(
+      http.post("/api/v1/missions/10/assignments/", async ({ request }) => {
+        posted = await request.json();
+        return HttpResponse.json(
+          { requirements: [], accepted_count: 0, min_crew: 3, max_crew: 6, fully_covered: false, roster: [] },
+          { status: 201 },
+        );
+      }),
+    );
+
+    renderAt("/missions/10");
+    const dialog = await openMatchDialog();
+    await within(dialog).findByText("Priya Nair");
+    const priyaCard = screen.getByText("Priya Nair").closest("li") as HTMLElement;
+
+    // Swap Priya -> Jae Kim, then change their mind and re-check Priya's own
+    // checkbox -- the only affordance for "undo" a swap, since the backend never
+    // offers the original holder back as a swap option.
+    await userEvent.click(within(dialog).getByRole("combobox", { name: /swap piloting ≥7/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /jae kim/i }));
+    expect(within(priyaCard).getByRole("checkbox", { name: /priya nair/i })).not.toBeChecked();
+
+    await userEvent.click(within(priyaCard).getByRole("checkbox", { name: /priya nair/i }));
+
+    // Self-consistent afterwards: Priya is checked again, her card no longer shows
+    // a "Swapped in" badge that would contradict that, and the count reflects the
+    // original team, not the original team plus the swapped-in candidate.
+    expect(within(priyaCard).getByRole("checkbox", { name: /priya nair/i })).toBeChecked();
+    expect(within(priyaCard).queryByText(/swapped in/i)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/not proposed/i)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: /propose 2 assignments/i })).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: /propose 2 assignments/i }));
+    // Priya (3) and Sam (4) -- the original team. Jae Kim (5), the swapped-in
+    // candidate, must NOT be double-covering Priya's seat.
+    expect(posted).toEqual({ user_ids: [4, 3] });
+  });
+
   it("visibly marks a member's card as not proposed when a swap unchecks them, even though their other seat's badge still renders", async () => {
     server.use(http.post("/api/v1/missions/10/match/", () => HttpResponse.json(generalistMatch)));
 

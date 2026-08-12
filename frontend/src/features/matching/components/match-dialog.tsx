@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useProposeAssignments } from "@/features/assignments/api/assignments";
-import { useRunMatch } from "@/features/matching/api/matching";
+import { useRunMatch, type ProposedMember } from "@/features/matching/api/matching";
 import { errorMessage } from "@/lib/api-errors";
 import { hasPermission, useUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -50,8 +50,10 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
   const canPropose = hasPermission(user, "assignment.manage");
   // The bulk-propose selection: user_ids that will be posted. Starts as every
   // team member the matcher proposed (default checked, per the brief) and is
-  // adjusted by unchecking a member's own checkbox or swapping a seat for an
-  // alternative (which unchecks the original holder and checks the alternative).
+  // adjusted by unchecking a member's own checkbox, swapping a seat for an
+  // alternative (which unchecks the original holder and checks the alternative), or
+  // re-checking a member whose seat was swapped away (which reverts that swap --
+  // see toggleMember).
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [swaps, setSwaps] = useState<Record<string, Swap>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -73,13 +75,55 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
 
   const result = runMatch.data;
 
-  function toggleMember(userId: number) {
+  // Unchecking is simple bookkeeping. Re-checking is not: if any of this member's
+  // seats were swapped away, re-checking them is how a lead reverts that swap --
+  // the backend never offers the original holder back as a swap *option*, so
+  // clicking their own checkbox is the only affordance for "undo". Without this,
+  // re-checking a swapped-out member would leave both them AND the swapped-in
+  // candidate selected for the same seat (Finding 3: state tracked in two places --
+  // `selected` and `swaps` -- disagreeing about who covers a seat).
+  function toggleMember(member: ProposedMember) {
+    const userId = member.user_id;
+    if (selected.has(userId)) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(userId);
+        return next;
+      });
+      return;
+    }
+
+    const keysToClear = member.seats
+      .map((seat) => swapKey(seat.requirement_id, userId))
+      .filter((key) => key in swaps);
+
+    // A swapped-in candidate could in principle be filling more than one reverted
+    // seat (the same bench candidate offered as an alternative for two different
+    // requirements) -- only drop them from `selected` if no *other* surviving swap
+    // still needs them.
+    const survivingCandidateIds = new Set(
+      Object.entries(swaps)
+        .filter(([key]) => !keysToClear.includes(key))
+        .map(([, swap]) => swap.user_id),
+    );
+    const candidateIdsToDrop = keysToClear
+      .map((key) => swaps[key].user_id)
+      .filter((candidateId) => !survivingCandidateIds.has(candidateId));
+
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(userId)) next.delete(userId);
-      else next.add(userId);
+      candidateIdsToDrop.forEach((id) => next.delete(id));
+      next.add(userId);
       return next;
     });
+
+    if (keysToClear.length > 0) {
+      setSwaps((prev) => {
+        const next = { ...prev };
+        keysToClear.forEach((key) => delete next[key]);
+        return next;
+      });
+    }
   }
 
   // `slotOwnerUserId` is the original matcher-proposed team member for this seat --
@@ -171,7 +215,7 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
                         type="checkbox"
                         id={`match-member-${member.user_id}`}
                         checked={isSelected}
-                        onChange={() => toggleMember(member.user_id)}
+                        onChange={() => toggleMember(member)}
                       />
                       <Label htmlFor={`match-member-${member.user_id}`} className="font-medium">
                         {member.name}
@@ -185,9 +229,9 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
                         </PopoverTrigger>
                         <PopoverContent>
                           <ul className="flex flex-col gap-1 text-xs">
-                            <li>Fit: {member.breakdown.proficiency_fit}</li>
-                            <li>Workload: {member.breakdown.workload_balance}</li>
-                            <li>Conflict penalty: {member.breakdown.soft_conflict_penalty}</li>
+                            <li>Fit: {member.breakdown.proficiency_fit.toFixed(2)}</li>
+                            <li>Workload: {member.breakdown.workload_balance.toFixed(2)}</li>
+                            <li>Conflict penalty: {member.breakdown.soft_conflict_penalty.toFixed(2)}</li>
                           </ul>
                         </PopoverContent>
                       </Popover>
