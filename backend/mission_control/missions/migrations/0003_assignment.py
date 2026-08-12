@@ -7,34 +7,84 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('missions', '0002_tenant_composite_fks'),
-        ('tenants', '0001_initial'),
+        ("missions", "0002_tenant_composite_fks"),
+        ("tenants", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='Assignment',
+            name="Assignment",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('status', models.CharField(choices=[('proposed', 'Proposed'), ('accepted', 'Accepted'), ('declined', 'Declined'), ('removed', 'Removed')], default='proposed', max_length=16)),
-                ('decline_reason', models.TextField(blank=True)),
-                ('responded_at', models.DateTimeField(blank=True, null=True)),
-                ('created_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='+', to=settings.AUTH_USER_MODEL)),
-                ('mission', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='assignments', to='missions.mission')),
-                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='+', to='tenants.tenant')),
-                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='assignments', to=settings.AUTH_USER_MODEL)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("proposed", "Proposed"),
+                            ("accepted", "Accepted"),
+                            ("declined", "Declined"),
+                            ("removed", "Removed"),
+                        ],
+                        default="proposed",
+                        max_length=16,
+                    ),
+                ),
+                ("decline_reason", models.TextField(blank=True)),
+                ("responded_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="+",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "mission",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="assignments",
+                        to="missions.mission",
+                    ),
+                ),
+                (
+                    "tenant",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="+",
+                        to="tenants.tenant",
+                    ),
+                ),
+                (
+                    "user",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="assignments",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
             options={
-                'constraints': [models.UniqueConstraint(condition=models.Q(('status__in', ['proposed', 'accepted'])), fields=('mission', 'user'), name='assignment_live_uniq')],
+                "constraints": [
+                    models.UniqueConstraint(
+                        condition=models.Q(("status__in", ["proposed", "accepted"])),
+                        fields=("mission", "user"),
+                        name="assignment_live_uniq",
+                    )
+                ],
             },
             managers=[
-                ('objects', django.db.models.manager.Manager()),
-                ('objects_unscoped', django.db.models.manager.Manager()),
+                ("objects", django.db.models.manager.Manager()),
+                ("objects_unscoped", django.db.models.manager.Manager()),
             ],
         ),
     ]
