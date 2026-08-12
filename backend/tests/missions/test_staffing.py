@@ -10,6 +10,7 @@ from mission_control.missions.factories import (
 from mission_control.missions.models import AssignmentStatus, MissionStatus
 from mission_control.missions.selectors.staffing import (
     HARD_BLOCK_MISSION_STATUSES,
+    committed_assignments,
     hard_blocked_user_ids,
     mission_coverage,
     soft_conflicts_for_users,
@@ -657,3 +658,84 @@ def test_deactivation_does_not_change_the_hard_block_predicate(tenant_ctx):
     assert a.user_id in hard_blocked_user_ids(
         start_date=mission.start_date, end_date=mission.end_date
     )
+
+
+# --------------------------------------------------------------- committed assignments
+
+
+def test_committed_assignments_returns_the_hard_blocking_rows_themselves(tenant_ctx):
+    """Same predicate as `hard_blocked_user_ids`, but with the missions attached."""
+    mission = tenant_ctx
+    committed = UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant, name="Committed")
+    soft = UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant, name="Soft")
+    hard = other_mission(
+        mission, status=MissionStatus.ACTIVE, start=D(2026, 9, 5), end=D(2026, 9, 15)
+    )
+    AssignmentFactory(mission=hard, user=committed, status=AssignmentStatus.ACCEPTED)
+    maybe = other_mission(
+        mission,
+        status=MissionStatus.PENDING_APPROVAL,
+        start=D(2026, 9, 5),
+        end=D(2026, 9, 15),
+        name="Maybe Op",
+    )
+    AssignmentFactory(mission=maybe, user=soft, status=AssignmentStatus.ACCEPTED)
+
+    rows = committed_assignments(
+        user_ids=[committed.id, soft.id], start_date=D(2026, 9, 1), end_date=D(2026, 9, 10)
+    )
+    assert [(a.user_id, a.mission.name) for a in rows] == [(committed.id, hard.name)]
+    assert {a.user_id for a in rows} == hard_blocked_user_ids(
+        start_date=D(2026, 9, 1), end_date=D(2026, 9, 10)
+    )
+
+
+def test_committed_assignments_honours_the_window_and_the_exclusion(tenant_ctx):
+    mission = tenant_ctx
+    member = UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant, name="Member")
+    AssignmentFactory(mission=mission, user=member, status=AssignmentStatus.ACCEPTED)
+    mission.status = MissionStatus.APPROVED
+    mission.save()
+    far = other_mission(
+        mission, status=MissionStatus.ACTIVE, start=D(2026, 12, 1), end=D(2026, 12, 5)
+    )
+    AssignmentFactory(mission=far, user=member, status=AssignmentStatus.ACCEPTED)
+
+    same_range = committed_assignments(
+        user_ids=[member.id],
+        start_date=mission.start_date,
+        end_date=mission.end_date,
+        exclude_mission_id=mission.id,
+    )
+    assert list(same_range) == []  # own mission excluded, December is out of range
+
+    wide = committed_assignments(
+        user_ids=[member.id],
+        start_date=mission.start_date,
+        end_date=D(2026, 12, 31),
+        exclude_mission_id=mission.id,
+    )
+    assert [a.mission_id for a in wide] == [far.id]
+
+
+def test_committed_assignments_is_one_query(tenant_ctx, django_assert_num_queries):
+    mission = tenant_ctx
+    members = [
+        UserFactory(role=Role.CREW_MEMBER, tenant=mission.tenant, name=f"M{i}") for i in range(6)
+    ]
+    for i, member in enumerate(members):
+        op = other_mission(
+            mission,
+            status=MissionStatus.ACTIVE,
+            start=D(2026, 9, 2),
+            end=D(2026, 9, 8),
+            name=f"Op {i}",
+        )
+        AssignmentFactory(mission=op, user=member, status=AssignmentStatus.ACCEPTED)
+
+    with django_assert_num_queries(1):
+        rows = committed_assignments(
+            user_ids=[m.id for m in members], start_date=D(2026, 9, 1), end_date=D(2026, 9, 10)
+        )
+        # `select_related` means touching each mission adds no query.
+        assert {a.mission.name for a in rows} == {f"Op {i}" for i in range(6)}

@@ -82,6 +82,28 @@ def hard_blocked_user_ids(
     return set(qs.values_list("user_id", flat=True))
 
 
+def committed_assignments(
+    *,
+    user_ids: Iterable[int],
+    start_date: dt.date,
+    end_date: dt.date,
+    exclude_mission_id: int | None = None,
+) -> QuerySet[Assignment]:
+    """The hard-blocking commitments themselves, for callers that need their dates.
+
+    Exactly the predicate behind `hard_blocked_user_ids` — accepted assignment on an
+    approved/active mission overlapping the range — but returning the assignments (with
+    their mission joined) rather than a set of user ids, so a caller can measure them.
+    The matcher uses it to total each candidate's committed days over a window wider
+    than the mission itself; going through here keeps "what counts as a firm
+    commitment" defined in exactly one place.
+    """
+    qs = _hard_block_qs(
+        start_date=start_date, end_date=end_date, exclude_mission_id=exclude_mission_id
+    )
+    return qs.filter(user_id__in=user_ids).select_related("mission")
+
+
 def soft_conflicts_for_users(
     *,
     user_ids: Iterable[int],
