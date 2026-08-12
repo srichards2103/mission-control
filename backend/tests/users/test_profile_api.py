@@ -19,6 +19,12 @@ def test_put_replaces_profile(auth_client_for):
     rows = CrewSkill.objects_unscoped.filter(user=crew)
     assert {(r.skill_id, r.proficiency) for r in rows} == {(s1.id, 7), (s2.id, 3)}
     assert not rows.filter(skill=old.skill).exists()
+    assert {(r["skill_id"], r["proficiency"]) for r in resp.data["results"]} == {
+        (s1.id, 7), (s2.id, 3),
+    }
+    assert resp.data["count"] == 2
+    assert resp.data["limit"] == 25
+    assert resp.data["offset"] == 0
 
 
 def test_archived_skill_rejected(auth_client_for):
@@ -70,10 +76,13 @@ def test_get_returns_own_profile_ordered_by_skill_name(auth_client_for):
     alpha = CrewSkillFactory(user=crew, skill=alpha_skill, proficiency=9)
     resp = auth_client_for(crew).get("/api/v1/me/skills/")
     assert resp.status_code == 200
-    assert resp.data["items"] == [
+    assert resp.data["results"] == [
         {"skill_id": alpha.skill_id, "skill_name": "Alpha", "proficiency": 9},
         {"skill_id": zeta.skill_id, "skill_name": "Zeta", "proficiency": 4},
     ]
+    assert resp.data["count"] == 2
+    assert resp.data["limit"] == 25
+    assert resp.data["offset"] == 0
 
 
 def test_put_replaces_only_actors_own_rows_not_other_users(auth_client_for):

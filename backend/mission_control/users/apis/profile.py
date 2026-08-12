@@ -1,7 +1,7 @@
 from rest_framework import serializers
-from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from mission_control.common.pagination import get_paginated_response
 from mission_control.users import selectors, services
 from mission_control.users.permissions import Permission, ensure_permission
 
@@ -19,7 +19,9 @@ class MySkillsApi(APIView):
     def get(self, request):
         ensure_permission(request.user, Permission.OWN_SKILLS_EDIT)
         rows = selectors.crew_skills_for_user(request.user)
-        return Response({"items": self.OutputSerializer(rows, many=True).data})
+        return get_paginated_response(
+            serializer_class=self.OutputSerializer, queryset=rows, request=request
+        )
 
     def put(self, request):
         ensure_permission(request.user, Permission.OWN_SKILLS_EDIT)
@@ -27,4 +29,6 @@ class MySkillsApi(APIView):
         items_serializer.is_valid(raise_exception=True)
         services.crew_skills_set(actor=request.user, items=items_serializer.validated_data)
         rows = selectors.crew_skills_for_user(request.user)
-        return Response({"items": self.OutputSerializer(rows, many=True).data})
+        return get_paginated_response(
+            serializer_class=self.OutputSerializer, queryset=rows, request=request
+        )
