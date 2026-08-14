@@ -10,8 +10,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Field, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useCreateMission } from "@/features/missions/api/missions";
 import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
 
@@ -93,88 +93,64 @@ export function MissionCreateDialog() {
           <DialogDescription>Create a draft mission to start planning.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mission-name">Name</Label>
+          <Field label="Name" htmlFor="mission-name" errors={fieldErrors.name}>
             <Input id="mission-name" value={name} onChange={(e) => setName(e.target.value)} required />
-            {fieldErrors.name && (
-              <p role="alert" className="text-sm text-destructive">
-                {fieldErrors.name.join(" ")}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="mission-description">Description</Label>
+          </Field>
+          <Field label="Description" htmlFor="mission-description" errors={fieldErrors.description}>
             <Input
               id="mission-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-            {fieldErrors.description && (
-              <p role="alert" className="text-sm text-destructive">{fieldErrors.description.join(" ")}</p>
-            )}
-          </div>
+          </Field>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mission-start-date">Start date</Label>
+            <Field label="Start date" htmlFor="mission-start-date" errors={fieldErrors.start_date}>
               <Input
                 id="mission-start-date"
                 type="date"
+                className="num"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
                 required
               />
-              {fieldErrors.start_date && (
-                <p role="alert" className="text-sm text-destructive">{fieldErrors.start_date.join(" ")}</p>
-              )}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mission-end-date">End date</Label>
+            </Field>
+            <Field label="End date" htmlFor="mission-end-date" errors={fieldErrors.end_date}>
               <Input
                 id="mission-end-date"
                 type="date"
+                className="num"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
                 required
               />
-              {fieldErrors.end_date && (
-                <p role="alert" className="text-sm text-destructive">{fieldErrors.end_date.join(" ")}</p>
-              )}
-            </div>
+            </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mission-min-crew">Min crew</Label>
+            <Field label="Min crew" htmlFor="mission-min-crew" errors={fieldErrors.min_crew}>
               <Input
                 id="mission-min-crew"
                 type="number"
                 min={1}
+                className="num"
                 value={minCrew}
                 onChange={(e) => setMinCrew(e.target.value)}
                 required
               />
-              {fieldErrors.min_crew && (
-                <p role="alert" className="text-sm text-destructive">{fieldErrors.min_crew.join(" ")}</p>
-              )}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="mission-max-crew">Max crew</Label>
+            </Field>
+            <Field label="Max crew" htmlFor="mission-max-crew" errors={fieldErrors.max_crew}>
               <Input
                 id="mission-max-crew"
                 type="number"
                 min={1}
+                className="num"
                 value={maxCrew}
                 onChange={(e) => setMaxCrew(e.target.value)}
                 required
               />
-              {fieldErrors.max_crew && (
-                <p role="alert" className="text-sm text-destructive">{fieldErrors.max_crew.join(" ")}</p>
-              )}
-            </div>
+            </Field>
           </div>
           {fieldErrors.non_field_errors && (
-            <p role="alert" className="text-sm text-destructive">
-              {fieldErrors.non_field_errors.join(" ")}
-            </p>
+            <FieldError>{fieldErrors.non_field_errors.join(" ")}</FieldError>
           )}
           <DialogFooter>
             <Button type="submit" disabled={createMission.isPending}>

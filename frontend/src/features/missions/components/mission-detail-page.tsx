@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import { SectionLabel } from "@/components/ui/page-header";
 import { StaffingPanel } from "@/features/assignments/components/staffing-panel";
 import { useMission } from "@/features/missions/api/missions";
 import { MissionHistory } from "@/features/missions/components/mission-history";
@@ -27,20 +28,20 @@ export function MissionDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Link to="/missions" className="text-sm text-muted-foreground hover:underline">
+      <Link to="/missions" className="text-xs text-muted-foreground hover:text-foreground">
         ← Back to missions
       </Link>
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold">{mission.name}</h1>
+          <h1 className="text-[15px] leading-none font-semibold tracking-[-0.01em]">{mission.name}</h1>
           <MissionStatusBadge status={mission.status} />
         </div>
-        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
-          <span>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+          <span className="num">
             {mission.start_date} – {mission.end_date}
           </span>
-          <span>
+          <span className="num">
             Crew {mission.min_crew}–{mission.max_crew}
           </span>
           <span>Lead: {mission.created_by.name}</span>
@@ -50,17 +51,17 @@ export function MissionDetailPage() {
       </div>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Requirements</h2>
+        <SectionLabel>Requirements</SectionLabel>
         <RequirementsEditor mission={mission} />
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Staffing</h2>
+        <SectionLabel>Staffing</SectionLabel>
         <StaffingPanel missionId={mission.id} />
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">History</h2>
+        <SectionLabel>History</SectionLabel>
         <MissionHistory history={mission.history} />
       </section>
     </div>

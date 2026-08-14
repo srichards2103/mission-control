@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { RowActions, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useSetRequirements, type MissionDetail } from "@/features/missions/api/missions";
 import { useSkills } from "@/features/skills/api/skills";
 import { errorMessage, rowErrorsFrom } from "@/lib/api-errors";
@@ -56,16 +56,16 @@ export function RequirementsEditor({ mission }: { mission: MissionDetail }) {
         <TableHeader>
           <TableRow>
             <TableHead>Skill</TableHead>
-            <TableHead>Min proficiency</TableHead>
-            <TableHead>Count</TableHead>
+            <TableHead className="text-right">Min proficiency</TableHead>
+            <TableHead className="text-right">Count</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {mission.requirements.map((req) => (
             <TableRow key={req.id}>
               <TableCell>{req.skill_name}</TableCell>
-              <TableCell>≥ {req.min_proficiency}</TableCell>
-              <TableCell>× {req.required_count}</TableCell>
+              <TableCell className="num text-right">≥ {req.min_proficiency}</TableCell>
+              <TableCell className="num text-right">× {req.required_count}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -171,16 +171,16 @@ export function RequirementsEditor({ mission }: { mission: MissionDetail }) {
                   onChange={(e) => updateRow(row.skill_id, { required_count: Number(e.target.value) })}
                 />
               </TableCell>
-              <TableCell>
+              <RowActions>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   aria-label={`Remove ${row.skill_name}`}
                   onClick={() => removeRow(row.skill_id)}
                 >
                   Remove
                 </Button>
-              </TableCell>
+              </RowActions>
             </TableRow>
           ))}
           <TableRow>
@@ -191,9 +191,13 @@ export function RequirementsEditor({ mission }: { mission: MissionDetail }) {
                 </p>
               ) : (
                 <Select value={pendingSkillId} onValueChange={addRow} disabled={skillsLoading}>
-                  <SelectTrigger size="sm" aria-label="Add a skill requirement">
+                  <SelectTrigger size="sm" className="min-w-40" aria-label="Add a skill requirement">
                     <SelectValue placeholder={skillsLoading ? "Loading skills…" : "Add a skill"}>
-                      {(value: string) => availableSkills.find((s) => String(s.id) === value)?.name ?? value}
+                      {(value: string) =>
+                        value
+                          ? (availableSkills.find((s) => String(s.id) === value)?.name ?? value)
+                          : (skillsLoading ? "Loading skills…" : "Add a skill")
+                      }
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>

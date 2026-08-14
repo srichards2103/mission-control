@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { StatusDot } from "@/components/ui/status-dot";
+import { RowActions, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCreateSkill, useSkills, useUpdateSkill } from "@/features/skills/api/skills";
 import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
 
@@ -57,38 +58,42 @@ export function SkillsTab() {
       <TableBody>
         {skills?.map((skill) => (
           <TableRow key={skill.id}>
-            <TableCell>{skill.name}</TableCell>
-            <TableCell>{skill.description}</TableCell>
-            <TableCell>{skill.is_archived && <Badge variant="outline">Archived</Badge>}</TableCell>
+            <TableCell className={skill.is_archived ? "text-muted-foreground" : "font-medium"}>
+              {skill.name}
+            </TableCell>
+            <TableCell className="text-muted-foreground">{skill.description}</TableCell>
             <TableCell>
-              <Button size="sm" variant="outline" onClick={() => toggleArchived(skill.id, skill.is_archived)}>
+              {skill.is_archived ? (
+                <StatusDot color="gray" muted>Archived</StatusDot>
+              ) : (
+                <StatusDot color="green">Active</StatusDot>
+              )}
+            </TableCell>
+            <RowActions>
+              <Button size="sm" variant="ghost" onClick={() => toggleArchived(skill.id, skill.is_archived)}>
                 {skill.is_archived ? "Restore" : "Archive"}
               </Button>
-            </TableCell>
+            </RowActions>
           </TableRow>
         ))}
-        <TableRow>
-          <TableCell>
+        <TableRow className="hover:bg-transparent">
+          <TableCell className="py-2 align-top">
             <Input placeholder="New skill name" value={name} onChange={(e) => setName(e.target.value)} />
-            {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name.join(" ")}</p>}
+            {fieldErrors.name && <FieldError>{fieldErrors.name.join(" ")}</FieldError>}
             {fieldErrors.non_field_errors && (
-              <p role="alert" className="text-sm text-destructive">
-                {fieldErrors.non_field_errors.join(" ")}
-              </p>
+              <FieldError>{fieldErrors.non_field_errors.join(" ")}</FieldError>
             )}
           </TableCell>
-          <TableCell>
+          <TableCell className="py-2 align-top">
             <Input
               placeholder="Description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-            {fieldErrors.description && (
-              <p className="text-sm text-destructive">{fieldErrors.description.join(" ")}</p>
-            )}
+            {fieldErrors.description && <FieldError>{fieldErrors.description.join(" ")}</FieldError>}
           </TableCell>
           <TableCell />
-          <TableCell>
+          <TableCell className="py-2 text-right align-top">
             <Button size="sm" onClick={handleAdd} disabled={createSkill.isPending}>
               Add skill
             </Button>

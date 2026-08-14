@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusDot } from "@/components/ui/status-dot";
 import {
   Dialog,
   DialogContent,
@@ -200,7 +200,7 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
                   <li
                     key={member.user_id}
                     className={cn(
-                      "flex flex-col gap-2 rounded-lg border p-3 transition-opacity",
+                      "flex flex-col gap-2 rounded-md border p-2.5 transition-opacity",
                       // Finding 2 fix: an unchecked member (whether unchecked directly or
                       // as the fallout of a swap on one of their seats) must be visibly
                       // distinct, not just reflected in the checkbox's `checked` prop --
@@ -240,9 +240,7 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
                       {member.soft_conflicts.length > 0 && (
                         <Popover>
                           <PopoverTrigger className="cursor-pointer">
-                            <Badge variant="outline" className="border-amber-500 text-amber-600">
-                              Conflict
-                            </Badge>
+                            <StatusDot color="amber" className="text-amber-600">Conflict</StatusDot>
                           </PopoverTrigger>
                           <PopoverContent>
                             <ul className="flex flex-col gap-1 text-xs">
@@ -267,10 +265,10 @@ export function MatchDialog({ missionId, open, onOpenChange }: MatchDialogProps)
                         const alt = result.alternatives.find((a) => a.requirement_id === seat.requirement_id);
                         return (
                           <div key={seat.requirement_id} className="flex flex-wrap items-center gap-2">
-                            <Badge variant="secondary">
+                            <span className="num text-xs text-muted-foreground">
                               {seat.skill_name} ≥{seat.min_proficiency}
-                            </Badge>
-                            {swap && <Badge variant="outline">Swapped in: {swap.name}</Badge>}
+                            </span>
+                            {swap && <span className="text-xs font-medium text-blue-600 dark:text-blue-400">Swapped in: {swap.name}</span>}
                             {alt && alt.candidates.length > 0 && (
                               <Select value={swap ? String(swap.user_id) : ""} onValueChange={(value) =>
                                 handleSwap(seat.requirement_id, member.user_id, currentHolderUserId, value)

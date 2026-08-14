@@ -2,8 +2,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { login } from "@/features/auth/api/auth";
 import { errorMessage } from "@/lib/api-errors";
 
@@ -37,8 +37,7 @@ export function LoginForm() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="email">Email</Label>
+            <Field label="Email" htmlFor="email">
               <Input
                 id="email"
                 type="email"
@@ -47,9 +46,8 @@ export function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="password">Password</Label>
+            </Field>
+            <Field label="Password" htmlFor="password">
               <Input
                 id="password"
                 type="password"
@@ -58,12 +56,8 @@ export function LoginForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
-            </div>
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            )}
+            </Field>
+            {error && <FieldError>{error}</FieldError>}
             <Button type="submit" disabled={submitting}>
               {submitting ? "Signing in…" : "Sign in"}
             </Button>

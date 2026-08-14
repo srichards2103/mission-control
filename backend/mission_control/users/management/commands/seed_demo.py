@@ -68,14 +68,29 @@ ARCHIVED_SKILL_NAME = "Legacy Telemetry"
 
 # "sentinel": the name of the last mission each tenant's build creates, used to
 # gate whether that tenant's mission set needs building at all (see module docstring).
+# Crew names are deterministic, realistic human names (the UI sorts them with a
+# numeric-aware collator); crew emails stay crew{i}@{slug}.test so logins and tests
+# are unaffected by the display names.
 TENANTS = [
     {
-        "name": "Helios Aerospace", "slug": "helios-aerospace", "crew_count": 15,
+        "name": "Helios Aerospace", "slug": "helios-aerospace",
         "sentinel": "Vesta Sample Return",
+        "director_name": "Rosa Delgado", "lead_name": "Marcus Hale",
+        "crew_names": [
+            "Amara Okafor", "Ben Whitfield", "Carmen Reyes", "Daniel Chow",
+            "Elena Vasquez", "Farid Nassar", "Grace Kim", "Henrik Larsen",
+            "Imogen Clarke", "Jonas Weber", "Keiko Tanaka", "Liam O'Donnell",
+            "Maya Krishnan", "Nikolai Petrov", "Olivia Hart",
+        ],
     },
     {
-        "name": "Meridian Orbital", "slug": "meridian-orbital", "crew_count": 8,
+        "name": "Meridian Orbital", "slug": "meridian-orbital",
         "sentinel": "Rhea Ice Survey",
+        "director_name": "Margaret Chen", "lead_name": "Priya Sharma",
+        "crew_names": [
+            "Aisha Bello", "Bruno Costa", "Chloe Nguyen", "Darius Cole",
+            "Esther Adeyemi", "Felix Braun", "Hana Suzuki", "Ivan Sokolov",
+        ],
     },
 ]
 
@@ -118,26 +133,30 @@ class Command(BaseCommand):
             user = User.objects.create_user(
                 email=email, password=DEMO_PASSWORD, tenant=tenant, role=role, name=name
             )
+        elif user.name != name:
+            # Keep display names in sync with the seed spec on re-runs, so a
+            # long-lived dev database picks up seed renames without a wipe.
+            user.name = name
+            user.save(update_fields=["name"])
         return user
 
     def _seed_users_and_skills(self, tenant, spec):
         slug = spec["slug"]
-        label = spec["name"].split()[0]
 
         director = self._get_or_create_user(
             email=f"director@{slug}.test", tenant=tenant, role=Role.DIRECTOR,
-            name=f"{label} Director",
+            name=spec["director_name"],
         )
         lead = self._get_or_create_user(
             email=f"lead@{slug}.test", tenant=tenant, role=Role.MISSION_LEAD,
-            name=f"{label} Mission Lead",
+            name=spec["lead_name"],
         )
         crew = [
             self._get_or_create_user(
                 email=f"crew{i + 1}@{slug}.test", tenant=tenant, role=Role.CREW_MEMBER,
-                name=f"Crew {i + 1}",
+                name=crew_name,
             )
-            for i in range(spec["crew_count"])
+            for i, crew_name in enumerate(spec["crew_names"])
         ]
 
         skills = {}

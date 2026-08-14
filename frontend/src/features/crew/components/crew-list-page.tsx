@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCrew } from "@/features/crew/api/crew";
+import { sortByName } from "@/lib/utils";
 
 export function CrewListPage() {
   const { data: crew, isLoading, isError } = useCrew();
@@ -15,9 +16,11 @@ export function CrewListPage() {
     );
   }
 
+  const sorted = sortByName(crew ?? [], (member) => member.name);
+
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Crew</h1>
+      <PageHeader title="Crew" />
       <Table>
         <TableHeader>
           <TableRow>
@@ -27,22 +30,16 @@ export function CrewListPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {crew?.map((member) => (
+          {sorted.map((member) => (
             <TableRow key={member.id}>
               <TableCell>
                 <Link to={`/crew/${member.id}`} className="font-medium hover:underline">
                   {member.name}
                 </Link>
               </TableCell>
-              <TableCell>{member.email}</TableCell>
-              <TableCell>
-                <div className="flex flex-wrap gap-1">
-                  {member.skills.map((skill) => (
-                    <Badge key={skill.skill_id} variant="secondary">
-                      {skill.name} {skill.proficiency}
-                    </Badge>
-                  ))}
-                </div>
+              <TableCell className="text-muted-foreground">{member.email}</TableCell>
+              <TableCell className="num text-muted-foreground">
+                {member.skills.map((skill) => `${skill.name} ${skill.proficiency}`).join(" · ")}
               </TableCell>
             </TableRow>
           ))}

@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -11,8 +9,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { PageHeader, SectionLabel } from "@/components/ui/page-header";
+import { StatusDot, type StatusDotColor } from "@/components/ui/status-dot";
 import { useMyAssignments, useRespondAssignment, type MyAssignment } from "@/features/assignments/api/assignments";
 import { TERMINAL_MISSION_STATUSES } from "@/features/missions/components/mission-status-badge";
 import { errorMessage } from "@/lib/api-errors";
@@ -24,15 +24,44 @@ const ASSIGNMENT_STATUS_LABELS: Record<MyAssignment["status"], string> = {
   removed: "Removed",
 };
 
+const ASSIGNMENT_STATUS_DOTS: Record<MyAssignment["status"], { color: StatusDotColor; muted?: boolean }> = {
+  proposed: { color: "amber" },
+  accepted: { color: "green" },
+  declined: { color: "red" },
+  removed: { color: "gray", muted: true },
+};
+
 function isUpcoming(assignment: MyAssignment): boolean {
   return assignment.status === "accepted" && !TERMINAL_MISSION_STATUSES.includes(assignment.mission.status);
 }
 
-function MissionDates({ assignment }: { assignment: MyAssignment }) {
+function AssignmentRow({
+  assignment,
+  right,
+  muted = false,
+}: {
+  assignment: MyAssignment;
+  right?: React.ReactNode;
+  muted?: boolean;
+}) {
   return (
-    <p className="text-sm text-muted-foreground">
-      {assignment.mission.start_date} – {assignment.mission.end_date}
-    </p>
+    <li className="flex items-start justify-between gap-4 border-b py-2.5 last:border-0">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className={muted ? "text-sm font-medium text-muted-foreground" : "text-sm font-medium"}>
+          {assignment.mission.name}
+        </span>
+        <span className="num text-xs text-muted-foreground">
+          {assignment.mission.start_date} – {assignment.mission.end_date}
+        </span>
+        {assignment.mission.description && (
+          <span className="text-sm text-muted-foreground">{assignment.mission.description}</span>
+        )}
+        {assignment.status === "declined" && assignment.decline_reason && (
+          <span className="text-sm text-muted-foreground">Reason: {assignment.decline_reason}</span>
+        )}
+      </div>
+      {right && <div className="flex shrink-0 items-center gap-2 pt-0.5">{right}</div>}
+    </li>
   );
 }
 
@@ -40,7 +69,7 @@ export function MyAssignmentsPage() {
   const { data: assignments, isLoading, isError } = useMyAssignments();
   const respondAssignment = useRespondAssignment();
   // Tracks which single assignment is mid-response, so an in-flight accept/decline
-  // only disables that card's own buttons rather than every card's (respondAssignment
+  // only disables that row's own buttons rather than every row's (respondAssignment
   // is one shared mutation object for the whole page).
   const [respondingId, setRespondingId] = useState<number | null>(null);
   const [decliningId, setDecliningId] = useState<number | null>(null);
@@ -98,26 +127,21 @@ export function MyAssignmentsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <h1 className="text-xl font-semibold">My assignments</h1>
+    <div className="flex flex-col gap-6">
+      <PageHeader title="My assignments" />
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">Pending proposals</h2>
+      <section className="flex flex-col gap-2">
+        <SectionLabel>Pending proposals</SectionLabel>
         {pending.length === 0 ? (
           <p className="text-sm text-muted-foreground">No pending proposals.</p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <ul className="flex flex-col border-y">
             {pending.map((assignment) => (
-              <Card key={assignment.id}>
-                <CardHeader>
-                  <CardTitle>{assignment.mission.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  <MissionDates assignment={assignment} />
-                  {assignment.mission.description && (
-                    <p className="text-sm">{assignment.mission.description}</p>
-                  )}
-                  <div className="flex gap-2">
+              <AssignmentRow
+                key={assignment.id}
+                assignment={assignment}
+                right={
+                  <>
                     <Button
                       size="sm"
                       disabled={respondingId === assignment.id}
@@ -133,60 +157,49 @@ export function MyAssignmentsPage() {
                     >
                       Decline
                     </Button>
-                  </div>
-                </CardContent>
-              </Card>
+                  </>
+                }
+              />
             ))}
-          </div>
+          </ul>
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">Upcoming</h2>
+      <section className="flex flex-col gap-2">
+        <SectionLabel>Upcoming</SectionLabel>
         {upcoming.length === 0 ? (
           <p className="text-sm text-muted-foreground">No upcoming assignments.</p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <ul className="flex flex-col border-y">
             {upcoming.map((assignment) => (
-              <Card key={assignment.id}>
-                <CardHeader>
-                  <CardTitle>{assignment.mission.name}</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  <MissionDates assignment={assignment} />
-                  {assignment.mission.description && (
-                    <p className="text-sm">{assignment.mission.description}</p>
-                  )}
-                </CardContent>
-              </Card>
+              <AssignmentRow key={assignment.id} assignment={assignment} />
             ))}
-          </div>
+          </ul>
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">History</h2>
+      <section className="flex flex-col gap-2">
+        <SectionLabel>History</SectionLabel>
         {history.length === 0 ? (
           <p className="text-sm text-muted-foreground">No history yet.</p>
         ) : (
-          <div className="flex flex-col gap-3">
+          <ul className="flex flex-col border-y">
             {history.map((assignment) => (
-              <Card key={assignment.id} className="text-muted-foreground opacity-75">
-                <CardHeader>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CardTitle className="text-muted-foreground">{assignment.mission.name}</CardTitle>
-                    <Badge variant="secondary">{ASSIGNMENT_STATUS_LABELS[assignment.status]}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-1">
-                  <MissionDates assignment={assignment} />
-                  {assignment.status === "declined" && assignment.decline_reason && (
-                    <p className="text-sm">Reason: {assignment.decline_reason}</p>
-                  )}
-                </CardContent>
-              </Card>
+              <AssignmentRow
+                key={assignment.id}
+                assignment={assignment}
+                muted
+                right={
+                  <StatusDot
+                    color={ASSIGNMENT_STATUS_DOTS[assignment.status].color}
+                    muted={ASSIGNMENT_STATUS_DOTS[assignment.status].muted}
+                  >
+                    {ASSIGNMENT_STATUS_LABELS[assignment.status]}
+                  </StatusDot>
+                }
+              />
             ))}
-          </div>
+          </ul>
         )}
       </section>
 
@@ -196,14 +209,13 @@ export function MyAssignmentsPage() {
             <DialogTitle>Decline proposal</DialogTitle>
             <DialogDescription>A reason is optional.</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="decline-reason">Reason (optional)</Label>
+          <Field label="Reason (optional)" htmlFor="decline-reason">
             <Input
               id="decline-reason"
               value={declineReason}
               onChange={(e) => setDeclineReason(e.target.value)}
             />
-          </div>
+          </Field>
           <DialogFooter>
             <Button
               variant="destructive"

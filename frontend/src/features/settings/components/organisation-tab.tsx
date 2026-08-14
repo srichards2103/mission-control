@@ -2,7 +2,9 @@ import { useState } from "react";
 import { PencilIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { SectionLabel } from "@/components/ui/page-header";
 import { useOrganisation, useUpdateOrganisation } from "@/features/settings/api/settings";
 import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
 
@@ -41,7 +43,7 @@ export function OrganisationTab() {
 
   return (
     <div className="flex max-w-sm flex-col gap-2">
-      <span className="text-sm font-medium text-muted-foreground">Organisation name</span>
+      <SectionLabel>Organisation name</SectionLabel>
       {editing ? (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
@@ -58,16 +60,14 @@ export function OrganisationTab() {
               Cancel
             </Button>
           </div>
-          {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name.join(" ")}</p>}
+          {fieldErrors.name && <FieldError>{fieldErrors.name.join(" ")}</FieldError>}
           {fieldErrors.non_field_errors && (
-            <p role="alert" className="text-sm text-destructive">
-              {fieldErrors.non_field_errors.join(" ")}
-            </p>
+            <FieldError>{fieldErrors.non_field_errors.join(" ")}</FieldError>
           )}
         </div>
       ) : (
         <div className="flex items-center gap-2">
-          <span className="text-base">{organisation.name}</span>
+          <span className="text-sm">{organisation.name}</span>
           <Button size="icon-sm" variant="ghost" aria-label="Edit organisation name" onClick={startEditing}>
             <PencilIcon />
           </Button>

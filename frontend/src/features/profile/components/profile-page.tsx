@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/ui/page-header";
+import { RowActions, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useMySkills, useSetMySkills, type MySkill } from "@/features/profile/api/profile";
 import { useSkills } from "@/features/skills/api/skills";
 import { errorMessage, rowErrorsFrom } from "@/lib/api-errors";
@@ -92,7 +93,7 @@ export function ProfilePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">My Profile</h1>
+      <PageHeader title="My Profile" />
       <Table>
         <TableHeader>
           <TableRow>
@@ -129,16 +130,16 @@ export function ProfilePage() {
                   </SelectContent>
                 </Select>
               </TableCell>
-              <TableCell>
+              <RowActions>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   aria-label={`Remove ${row.skill_name}`}
                   onClick={() => removeSkill(row.skill_id)}
                 >
                   Remove
                 </Button>
-              </TableCell>
+              </RowActions>
             </TableRow>
           ))}
           <TableRow>
@@ -149,10 +150,12 @@ export function ProfilePage() {
                 </p>
               ) : (
                 <Select value={pendingSkillId} onValueChange={addSkill} disabled={skillsLoading}>
-                  <SelectTrigger size="sm" aria-label="Add a skill">
+                  <SelectTrigger size="sm" className="min-w-40" aria-label="Add a skill">
                     <SelectValue placeholder={skillsLoading ? "Loading skills…" : "Add a skill"}>
                       {(value: string) =>
-                        availableSkills.find((s) => String(s.id) === value)?.name ?? value
+                        value
+                          ? (availableSkills.find((s) => String(s.id) === value)?.name ?? value)
+                          : (skillsLoading ? "Loading skills…" : "Add a skill")
                       }
                     </SelectValue>
                   </SelectTrigger>

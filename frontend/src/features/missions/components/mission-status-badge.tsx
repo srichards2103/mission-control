@@ -1,5 +1,4 @@
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { StatusDot, type StatusDotColor } from "@/components/ui/status-dot";
 import type { MissionStatus } from "@/features/missions/api/missions";
 
 export const MISSION_STATUS_LABELS: Record<MissionStatus, string> = {
@@ -18,35 +17,22 @@ export const MISSION_STATUS_LABELS: Record<MissionStatus, string> = {
 // Set). Import this rather than re-declaring it a fourth time.
 export const TERMINAL_MISSION_STATUSES: readonly MissionStatus[] = ["completed", "cancelled"];
 
-// Badge has no amber/blue/green variant, so those three statuses reuse the
-// "outline" variant and layer color utility classes on top.
-const STATUS_STYLES: Record<
-  MissionStatus,
-  { variant: "default" | "secondary" | "destructive" | "outline"; className?: string }
-> = {
-  draft: { variant: "secondary" },
-  pending_approval: {
-    variant: "outline",
-    className: "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300",
-  },
-  approved: {
-    variant: "outline",
-    className: "border-blue-300 bg-blue-100 text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300",
-  },
-  active: {
-    variant: "outline",
-    className: "border-green-300 bg-green-100 text-green-900 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
-  },
-  completed: { variant: "default" },
-  rejected: { variant: "destructive" },
-  cancelled: { variant: "outline", className: "text-muted-foreground" },
+// Statuses render as a colored dot + text (see StatusDot), not filled pills.
+const STATUS_DOTS: Record<MissionStatus, { color: StatusDotColor; muted?: boolean }> = {
+  draft: { color: "gray" },
+  pending_approval: { color: "amber" },
+  approved: { color: "blue" },
+  active: { color: "green" },
+  completed: { color: "purple" },
+  rejected: { color: "red" },
+  cancelled: { color: "gray", muted: true },
 };
 
 export function MissionStatusBadge({ status }: { status: MissionStatus }) {
-  const style = STATUS_STYLES[status];
+  const dot = STATUS_DOTS[status];
   return (
-    <Badge variant={style.variant} className={cn(style.className)}>
+    <StatusDot color={dot.color} muted={dot.muted}>
       {MISSION_STATUS_LABELS[status]}
-    </Badge>
+    </StatusDot>
   );
 }

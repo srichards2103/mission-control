@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { SectionLabel } from "@/components/ui/page-header";
+import { StatusDot, type StatusDotColor } from "@/components/ui/status-dot";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useRemoveAssignment, useStaffing } from "@/features/assignments/api/assignments";
 import { AddCrewDialog } from "@/features/assignments/components/add-crew-dialog";
@@ -10,6 +11,13 @@ import { useMission } from "@/features/missions/api/missions";
 import { TERMINAL_MISSION_STATUSES } from "@/features/missions/components/mission-status-badge";
 import { errorMessage } from "@/lib/api-errors";
 import { hasPermission, useUser } from "@/lib/auth";
+
+const ASSIGNMENT_DOTS: Record<string, { color: StatusDotColor; muted?: boolean }> = {
+  proposed: { color: "amber" },
+  accepted: { color: "green" },
+  declined: { color: "red" },
+  removed: { color: "gray", muted: true },
+};
 
 export function StaffingPanel({ missionId }: { missionId: number }) {
   const { data: user } = useUser();
@@ -58,7 +66,7 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
-        <p className="text-sm text-muted-foreground">
+        <p className="num text-sm text-muted-foreground">
           Crew {staffing.accepted_count}/{staffing.min_crew}
           {staffing.max_crew !== staffing.min_crew ? `–${staffing.max_crew}` : ""} ·{" "}
           {staffing.fully_covered ? "Fully covered" : "Not fully covered"}
@@ -71,11 +79,11 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
               req.required_count > 0 ? Math.min(100, (req.filled_count / req.required_count) * 100) : 100;
             return (
               <div key={req.requirement_id} className="flex flex-col gap-1">
-                <span className="text-sm">
+                <span className="num text-sm">
                   {req.skill_name} ≥{req.min_proficiency} · {req.filled_count}/{req.required_count}
                 </span>
-                <div className="h-2 w-full rounded-full bg-muted" role="progressbar" aria-valuenow={pct}>
-                  <div className="h-2 rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                <div className="h-1 w-full overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={pct}>
+                  <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {req.filled_by.length > 0
@@ -90,7 +98,7 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Roster</h3>
+          <SectionLabel>Roster</SectionLabel>
           <div className="flex gap-2">
             {canMatch && (
               <Button size="sm" variant="outline" onClick={() => setMatchOpen(true)}>
@@ -107,19 +115,26 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
         {staffing.roster.length === 0 ? (
           <p className="text-sm text-muted-foreground">No crew proposed yet.</p>
         ) : (
-          <ul className="flex flex-col gap-2" aria-label="Roster">
+          <ul className="flex flex-col border-y" aria-label="Roster">
             {staffing.roster.map((entry) => (
-              <li key={entry.assignment_id} className="flex flex-wrap items-center gap-2 text-sm">
+              <li
+                key={entry.assignment_id}
+                className="group/row flex h-[38px] flex-wrap items-center gap-3 border-b text-sm last:border-0"
+              >
                 <span className="font-medium">{entry.name}</span>
-                <Badge variant={entry.status === "accepted" ? "default" : "secondary"}>{entry.status}</Badge>
+                <StatusDot
+                  color={ASSIGNMENT_DOTS[entry.status]?.color ?? "gray"}
+                  muted={ASSIGNMENT_DOTS[entry.status]?.muted}
+                  className="capitalize"
+                >
+                  {entry.status}
+                </StatusDot>
                 {/* Soft conflict: overlapping but non-blocking commitment elsewhere — a
                     warning, surfaced via popover, never disables anything. */}
                 {entry.soft_conflicts.length > 0 && (
                   <Popover>
                     <PopoverTrigger className="cursor-pointer">
-                      <Badge variant="outline" className="border-amber-500 text-amber-600">
-                        Conflict
-                      </Badge>
+                      <StatusDot color="amber" className="text-amber-600">Conflict</StatusDot>
                     </PopoverTrigger>
                     <PopoverContent>
                       <ul className="flex flex-col gap-1 text-xs">
@@ -135,11 +150,12 @@ export function StaffingPanel({ missionId }: { missionId: number }) {
                 {/* Hard block: an accepted assignment on an approved/active mission with
                     overlapping dates — the one that actually blocks proposing this
                     person (the server refuses that with a 400). */}
-                {entry.hard_blocked && <Badge variant="destructive">Unavailable</Badge>}
+                {entry.hard_blocked && <StatusDot color="red" className="text-destructive">Unavailable</StatusDot>}
                 {canManage && (
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="ghost"
+                    className="ml-auto opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100"
                     aria-label={`Remove ${entry.name}`}
                     disabled={removingId === entry.assignment_id}
                     onClick={() => handleRemove(entry.assignment_id)}

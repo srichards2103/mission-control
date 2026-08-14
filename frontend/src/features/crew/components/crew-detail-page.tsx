@@ -1,6 +1,5 @@
 import { Link, useParams } from "react-router-dom";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { SectionLabel } from "@/components/ui/page-header";
 import { useCrewMember } from "@/features/crew/api/crew";
 
 export function CrewDetailPage() {
@@ -20,29 +19,32 @@ export function CrewDetailPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <Link to="/crew" className="text-sm text-muted-foreground hover:underline">
+    <div className="flex flex-col gap-6">
+      <Link to="/crew" className="text-xs text-muted-foreground hover:text-foreground">
         ← Back to crew
       </Link>
-      <Card className="max-w-md">
-        <CardHeader>
-          {/* CardTitle renders a <div>, not a semantic heading, so an explicit <h1>
-              is used here to give the page an accessible heading role. */}
-          <h1 className="font-heading text-base leading-snug font-medium">{member.name}</h1>
-          <p className="text-sm text-muted-foreground">{member.email}</p>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-1">
-          {member.skills.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No skills recorded.</p>
-          ) : (
-            member.skills.map((skill) => (
-              <Badge key={skill.skill_id} variant="secondary">
-                {skill.name} {skill.proficiency}
-              </Badge>
-            ))
-          )}
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-1">
+        <h1 className="text-[15px] leading-none font-semibold tracking-[-0.01em]">{member.name}</h1>
+        <p className="text-xs text-muted-foreground">{member.email}</p>
+      </div>
+      <section className="flex max-w-md flex-col gap-2">
+        <SectionLabel>Skills</SectionLabel>
+        {member.skills.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No skills recorded.</p>
+        ) : (
+          <ul className="flex flex-col border-y">
+            {member.skills.map((skill) => (
+              <li
+                key={skill.skill_id}
+                className="flex h-8 items-center justify-between border-b text-sm last:border-0"
+              >
+                <span>{skill.name}</span>
+                <span className="num text-muted-foreground">{skill.proficiency}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

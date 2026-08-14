@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -11,13 +10,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { StatusDot } from "@/components/ui/status-dot";
+import { RowActions, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCreateUser, useOrgUsers, useUpdateUser, type OrgUser } from "@/features/settings/api/settings";
 import { errorMessage, fieldErrorsFrom } from "@/lib/api-errors";
 import { ROLE_OPTIONS, roleLabel } from "@/lib/roles";
+import { sortByName } from "@/lib/utils";
 
 function AddUserDialog() {
   const [open, setOpen] = useState(false);
@@ -64,13 +66,10 @@ function AddUserDialog() {
           <DialogDescription>Invite a new crew member, lead, or director.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-user-name">Name</Label>
+          <Field label="Name" htmlFor="new-user-name" errors={fieldErrors.name}>
             <Input id="new-user-name" value={name} onChange={(e) => setName(e.target.value)} required />
-            {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name.join(" ")}</p>}
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-user-email">Email</Label>
+          </Field>
+          <Field label="Email" htmlFor="new-user-email" errors={fieldErrors.email}>
             <Input
               id="new-user-email"
               type="email"
@@ -78,10 +77,8 @@ function AddUserDialog() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            {fieldErrors.email && <p className="text-sm text-destructive">{fieldErrors.email.join(" ")}</p>}
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="new-user-password">Password</Label>
+          </Field>
+          <Field label="Password" htmlFor="new-user-password" errors={fieldErrors.password}>
             <Input
               id="new-user-password"
               type="password"
@@ -89,10 +86,7 @@ function AddUserDialog() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
-            {fieldErrors.password && (
-              <p className="text-sm text-destructive">{fieldErrors.password.join(" ")}</p>
-            )}
-          </div>
+          </Field>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="new-user-role">Role</Label>
             <Select value={role} onValueChange={(value) => setRole(value as OrgUser["role"])}>
@@ -158,8 +152,10 @@ export function UsersTab() {
     );
   }
 
+  const sorted = sortByName(users ?? [], (user) => user.name);
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex justify-end">
         <AddUserDialog />
       </div>
@@ -174,35 +170,35 @@ export function UsersTab() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {users?.map((user) => (
-            <TableRow key={user.id} className={user.is_active ? undefined : "opacity-50"}>
-              <TableCell>{user.name}</TableCell>
-              <TableCell>{user.email}</TableCell>
-              <TableCell>
-                <Badge variant="secondary">{roleLabel(user.role)}</Badge>
+          {sorted.map((user) => (
+            <TableRow key={user.id}>
+              <TableCell className={user.is_active ? "font-medium" : "font-medium text-muted-foreground"}>
+                {user.name}
               </TableCell>
+              <TableCell className="text-muted-foreground">{user.email}</TableCell>
+              <TableCell className="text-muted-foreground">{roleLabel(user.role)}</TableCell>
               <TableCell>
-                <Badge variant={user.is_active ? "secondary" : "outline"}>
-                  {user.is_active ? "Active" : "Inactive"}
-                </Badge>
+                {user.is_active ? (
+                  <StatusDot color="green">Active</StatusDot>
+                ) : (
+                  <StatusDot color="gray" muted>Inactive</StatusDot>
+                )}
               </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <RoleSelect user={user} />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() =>
-                      updateUser.mutate(
-                        { id: user.id, is_active: !user.is_active },
-                        { onError: (err) => toast.error(errorMessage(err)) },
-                      )
-                    }
-                  >
-                    {user.is_active ? "Deactivate" : "Reactivate"}
-                  </Button>
-                </div>
-              </TableCell>
+              <RowActions>
+                <RoleSelect user={user} />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() =>
+                    updateUser.mutate(
+                      { id: user.id, is_active: !user.is_active },
+                      { onError: (err) => toast.error(errorMessage(err)) },
+                    )
+                  }
+                >
+                  {user.is_active ? "Deactivate" : "Reactivate"}
+                </Button>
+              </RowActions>
             </TableRow>
           ))}
         </TableBody>

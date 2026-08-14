@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { PageHeader } from "@/components/ui/page-header";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MISSION_STATUSES, useMissions } from "@/features/missions/api/missions";
@@ -31,7 +32,7 @@ export function MissionsPage() {
             <TableHead>Name</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Dates</TableHead>
-            <TableHead>Crew</TableHead>
+            <TableHead className="text-right">Crew</TableHead>
             <TableHead>Lead</TableHead>
           </TableRow>
         </TableHeader>
@@ -46,13 +47,13 @@ export function MissionsPage() {
               <TableCell>
                 <MissionStatusBadge status={mission.status} />
               </TableCell>
-              <TableCell>
+              <TableCell className="num text-muted-foreground">
                 {mission.start_date} – {mission.end_date}
               </TableCell>
-              <TableCell>
+              <TableCell className="num text-right">
                 {mission.min_crew}–{mission.max_crew}
               </TableCell>
-              <TableCell>{mission.created_by.name}</TableCell>
+              <TableCell className="text-muted-foreground">{mission.created_by.name}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -62,12 +63,12 @@ export function MissionsPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Missions</h1>
-        {hasPermission(user, "mission.create") && <MissionCreateDialog />}
-      </div>
+      <PageHeader
+        title="Missions"
+        actions={hasPermission(user, "mission.create") && <MissionCreateDialog />}
+      />
       <Tabs value={status} onValueChange={(value) => setStatus(value as string)}>
-        <TabsList>
+        <TabsList variant="line">
           <TabsTrigger value={ALL}>All</TabsTrigger>
           {MISSION_STATUSES.map((s) => (
             <TabsTrigger key={s} value={s}>
