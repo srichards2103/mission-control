@@ -10,7 +10,7 @@
 
 ## 🧑 User — 2026-08-11 11:17
 
-`/plugin`
+`/plugin` install superpowers@claude-plugins-official
 
 ## 🧑 User — 2026-08-11 11:17
 
@@ -31,7 +31,7 @@ Help turn ideas into fully formed designs and specs through natural collaborat
 
 ## 🧑 User — 2026-08-11 11:19
 
-`/superpowers:brainstorming`
+`/superpowers:brainstorming` Please have a read of @project-brief.md . This is the initial project spec for the web app we need to build. Then have a thorough read of @initial-brief.md . This is a list of all of my thoughts regarding the direction that the app needs to take, and some initial thoughts on the data modelling side of things. I want you to help me converge on an optimal design that balances simplicity, robustness, and expressiveness, and to then write out a full design spec that we can use to then construct an end to end implementation plan, segmented by stages.
 
 <details><summary>📚 skill instructions loaded (collapsed)</summary>
 

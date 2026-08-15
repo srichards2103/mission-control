@@ -31,13 +31,19 @@ def is_skill_payload(text: str) -> bool:
 def clean_user_text(text: str) -> str:
     """Drop harness-injected wrappers, keep what the human actually typed."""
     text = SYSTEM_TAG_RE.sub("", text)
-    for tag in ("local-command-caveat", "command-message", "command-args", "local-command-stdout"):
+    for tag in ("local-command-caveat", "command-message", "local-command-stdout"):
         text = re.sub(rf"<{tag}>.*?</{tag}>", "", text, flags=re.DOTALL)
-    # A /command invocation: keep the command name as the visible prompt.
-    m = re.search(r"<command-name>(.*?)</command-name>", text, re.DOTALL)
-    if m:
+    # A /command invocation: the visible prompt is the command name plus whatever the
+    # user typed after it — the args ARE the user's message (e.g. the whole
+    # brainstorming prompt arrives as /superpowers:brainstorming <prompt>), so they
+    # must be kept, not stripped as harness noise.
+    name = re.search(r"<command-name>(.*?)</command-name>", text, re.DOTALL)
+    args = re.search(r"<command-args>(.*?)</command-args>", text, re.DOTALL)
+    if name:
         text = re.sub(r"<command-name>.*?</command-name>", "", text, flags=re.DOTALL)
-        text = f"`{m.group(1).strip()}`\n\n{text}"
+        text = re.sub(r"<command-args>.*?</command-args>", "", text, flags=re.DOTALL)
+        arg_text = args.group(1).strip() if args else ""
+        text = f"`{name.group(1).strip()}` {arg_text}\n\n{text}"
     return text.strip()
 
 
