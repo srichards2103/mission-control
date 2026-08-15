@@ -64,7 +64,9 @@ cd backend && uv run python manage.py migrate && uv run python manage.py seed_de
 
 ## Demo credentials
 
-All accounts share the password **`orbit-demo-2026`**.
+All accounts share the password **`orbit-demo-2026`**. Logins are by email; every account also has a
+realistic display name (e.g. `crew1@helios-aerospace.test` appears in the UI as **Amara Okafor**,
+`lead@helios-aerospace.test` as **Marcus Hale**, `director@helios-aerospace.test` as **Rosa Delgado**).
 
 | Tenant | Email | Role |
 |---|---|---|
@@ -94,9 +96,9 @@ Everything below happens in the **Helios Aerospace** tenant unless noted.
    fill — the organisation genuinely doesn't have three EVA Ops-qualified people (see the dashboard's
    skill-gap card for the same shortfall). Propose a candidate from the match result.
 2. Open **Ganymede Survey** (pending_approval). Its roster shows both conflict treatments side by side:
-   one crew member with an amber "Conflict" badge (a soft, non-blocking overlap with *Europa Ice Core*,
-   also pending) and one with a red "Unavailable" badge (a hard block — they're also accepted on the
-   now-approved *Titan Relay Deploy*, which overlaps in dates). Try **Approve** as
+   one crew member with an amber "Conflict" indicator (a soft, non-blocking overlap with *Europa Ice
+   Core*, also pending) and one with a red "Unavailable" indicator (a hard block — they're also accepted
+   on the now-approved *Titan Relay Deploy*, which overlaps in dates). Try **Approve** as
    `director@helios-aerospace.test` — the staffing guard refuses it, with reasons.
 3. **As `crew1@helios-aerospace.test`** — go to **My Assignments**. Accept or decline the pending
    *Europa Ice Core* proposal; see the existing accepted and declined entries in the other two groups.
@@ -184,6 +186,8 @@ frontend/                 # React SPA — see src/ above
 docker-compose.dev.yml    # Postgres + Django dev server + Vite (hot reload, proxy /api)
 docker-compose.yml        # Postgres + gunicorn + nginx (built SPA, /api proxy), fails closed on secrets
 docs/superpowers/specs/   # Design spec (source of truth for behaviour not covered here)
+docs/reviewer-notes.md    # How this was built (process), plus known loose ends
+docs/transcripts/         # Claude Code session transcripts (readable .md renders + raw .jsonl)
 ```
 
 ## Known limitations
@@ -207,6 +211,10 @@ Recorded here rather than left for a reviewer to discover:
   (`mission_control/missions/selectors/missions.py`), and even `search` has no UI control feeding it —
   it's reachable only by calling the API directly. Adding a date-range filter plus its UI is beyond this
   plan's scope, consistent with the pagination limitation above: disclosed here rather than implemented.
+
+Two further product-level loose ends — skill edits after assignment ("skill drift") and the lack of a
+crew-facing warning when accepting an overlapping proposal — are analysed in
+[`docs/reviewer-notes.md`](docs/reviewer-notes.md), alongside notes on how this codebase was built.
 
 None of the above is hidden from the codebase: `staffing_readiness()`'s docstring measures its own query
 count and the frontend list hooks are consistent (not accidental) across every list screen.
