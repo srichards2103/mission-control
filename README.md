@@ -28,28 +28,58 @@ on a skill it keeps needing.
 
 ## Quickstart
 
-**Dev** (hot-reload, Postgres + Django dev server + Vite):
+**Prerequisites:** git and Docker with Compose v2 (Docker Desktop on macOS/Windows, or Docker Engine +
+the compose plugin on Linux). Nothing else — both stacks run entirely in containers, so no local
+Python/Node toolchain is needed to get the app up. (You only need [`uv`](https://docs.astral.sh/uv/) and
+Node 22+ if you want to run tests or `manage.py` commands outside Docker — see
+[Running tests](#running-tests).)
+
+```bash
+git clone https://github.com/srichards2103/mission-control.git
+cd mission-control
+```
+
+### Dev stack (fastest path)
+
+Hot-reload everything: Postgres + Django dev server + Vite. **No `.env` file or environment variables
+are required** — the dev compose file carries safe defaults for everything.
 
 ```bash
 docker compose -f docker-compose.dev.yml up
 ```
 
-Open **http://localhost:5173**. The backend container runs migrations and `seed_demo` automatically
-before starting the dev server, so the app is populated the first time it comes up.
+Open **http://localhost:5173** and log in with any account from
+[Demo credentials](#demo-credentials) — e.g. `director@helios-aerospace.test` / `orbit-demo-2026`.
+The backend container runs migrations and `seed_demo` automatically before starting the dev server, so
+the app is fully populated the first time it comes up.
 
-**Prod** (built SPA behind nginx, gunicorn, migrations + seed on boot):
+### Prod stack
+
+Built SPA behind nginx, gunicorn, migrations + seed on boot. This stack requires one environment
+variable, `SECRET_KEY`; the supported way to provide it is a `.env` file next to `docker-compose.yml`
+(Compose auto-loads it):
+
+```bash
+cp .env.example .env
+# then edit .env and set:
+#   SECRET_KEY=<any long random string>        # required — e.g. `openssl rand -hex 32`
+#   ALLOWED_HOSTS=localhost,127.0.0.1          # optional — defaults to this; set real domain(s) in a deploy
+docker compose up --build
+```
+
+Or inline, without a `.env` file:
 
 ```bash
 SECRET_KEY=$(openssl rand -hex 32) docker compose up --build
 ```
 
 Open **http://localhost:80**. `docker-compose.yml` fails closed without `SECRET_KEY` set — this is
-deliberate, so a production-shaped stack can never boot on the placeholder dev key. Instead of the
-inline `SECRET_KEY=...` above, you can copy [`.env.example`](.env.example) to `.env` (Compose auto-loads
-it) and fill in `SECRET_KEY` (and optionally `ALLOWED_HOSTS`) there.
+deliberate, so a production-shaped stack can never boot on a known, publicly-committed placeholder key.
 
 Both compose files provision Postgres 16, wait for its healthcheck, then run `migrate` and `seed_demo`
-before serving. Re-running either command is safe: the seed is idempotent.
+before serving. Re-running either command is safe: the seed is idempotent. (A separate
+[`backend/.env.example`](backend/.env.example) exists only for running the Django backend directly on
+your machine, outside Docker — not needed for either compose flow.)
 
 Only `SECRET_KEY` fails closed — the Postgres credentials (`mission`/`mission`) are hardcoded in both
 compose files with no override path. Exposure is low: the prod `db` service publishes no host port, so
